@@ -265,7 +265,7 @@ if df_original is not None and not df_original.empty:
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
                     "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    <<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
+                    "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),  # <-- CORRIGIDO AQUI!
                     "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
                     "<<grandeza_texto>>": g_txt,
                     "<<grandeza_pontos>>": g_pt,
