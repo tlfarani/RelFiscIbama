@@ -256,7 +256,7 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     selecionados = df_f.iloc[indices_selecionados]
 
-    if not database_empty_check := selecionados.empty:  # <-- STRING CORRIGIDA AQUI!
+    if not selecionados.empty:  # <-- CORREÇÃO EXATA DA SINTAXE AQUI!
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
