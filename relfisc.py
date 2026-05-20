@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 from docx import Document
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
+from docx.enum.text import WD_COLOR_INDEX
 import io
 import os
 import requests
+import re
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
@@ -14,18 +14,17 @@ st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout
 
 def destacar_texto_amarelo(p, texto_substituto):
     """
-    Procura o texto substituto inserido no parágrafo e aplica um destaque 
-    (shading) amarelo diretamente no XML do Word para revisão manual.
+    Aplica o realce de marca-texto (Highlight) do Word estritamente sobre os caracteres 
+    do texto substituto, evitando pintar o fundo do parágrafo inteiro.
     """
     for run in p.runs:
         if texto_substituto in run.text:
-            shading_xml = f'<w:shd {nsdecls("w")} w:fill="FFFF00"/>'
-            run._r.get_or_add_rPr().append(parse_xml(shading_xml))
+            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
 def converter_data_excel(valor):
     val_str = str(valor).strip()
     if not val_str or val_str in ["nan", "None", "0"]:
-        return " [DATA - EDITAR MANUAL] "
+        return " [ DATA - EDITAR MANUAL ] "
         
     if val_str.isdigit():
         try:
@@ -36,31 +35,45 @@ def converter_data_excel(valor):
             pass
     return val_str
 
-def limpar_e_formatar_volume(valor):
+def extrair_volume_numerico(valor):
     """
-    Garante a extração correta de volumes extremamente pequenos (até 7 casas decimais)
-    mesmo que estejam poluídos com strings como 'm3' ou convertidos em notação científica.
+    EQUIVALENTE À VARIÁVEL NUMÉRICA DO VBA:
+    Extrai estritamente o número puro (float) para rodar os testes de limiares de modelo,
+    suportando precisão de até 7 casas decimais.
     """
+    if pd.isna(valor):
+        return 0.0
     val_str = str(valor).strip().lower()
-    if not val_str or val_str in ["nan", "None", "0"]:
-        return " [VOLUME - EDITAR MANUAL] "
-        
-    # Limpa unidades coladas no texto
+    # Remove m3, m³ e espaços
     val_limpo = val_str.replace("m3", "").replace("m³", "").strip()
+    # Substitui vírgula por ponto para o Python entender como float
+    val_limpo = val_limpo.replace(",", ".")
+    
+    # Filtra mantendo apenas números, pontos ou sinal de menos (caso use notação científica)
+    val_limpo = "".join(c for c in val_limpo if c.isdigit() or c in [".", "-", "e"])
     
     try:
-        # Corrige o padrão de vírgula flutuante
-        v = val_limpo.replace(",", ".")
-        f = float(v)
-        
-        # Formata explicitamente exibindo até 7 casas decimais e remove os zeros inúteis à direita
-        texto_formatado = f"{f:.7f}".rstrip('0')
-        if texto_formatado.endswith('.'):
-            texto_formatado = texto_formatado[:-1]
-            
-        return texto_formatado.replace(".", ",")
+        return float(val_limpo)
     except ValueError:
-        return val_limpo.replace(".", ",")
+        return 0.0
+
+def extrair_volume_texto(valor):
+    """
+    EQUIVALENTE À VARIÁVEL STRING DO VBA:
+    Preserva o formato de texto original para preenchimento da tag no Word.
+    """
+    if pd.isna(valor):
+        return " [ VOLUME - EDITAR MANUAL ] "
+        
+    val_str = str(valor).strip().lower()
+    if not val_str or val_str in ["nan", "none"]:
+        return " [ VOLUME - EDITAR MANUAL ] "
+        
+    # Limpa apenas a unidade de medida se ela estiver colada
+    val_limpo = val_str.replace("m3", "").replace("m³", "").strip()
+    # Garante o padrão brasileiro de vírgula para a exibição no relatório
+    val_limpo = val_limpo.replace(".", ",")
+    return val_limpo
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -83,7 +96,7 @@ def processar_grandeza(grandeza):
         return "quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"
     elif g == "Grave":
         return "quando os danos ambientais são de grande proporção ou de alta complexidade, gravidade ou magnitude, diante do contexto considerado", "70"
-    return "[GRANDEZA NÃO DEFINIDA]", "[PONTOS NÃO DEFINIDOS]"
+    return " [ GRANDEZA TEXTO - EDITAR MANUAL ] ", " [ PONTOS GRANDEZA - EDITAR MANUAL ] "
 
 def processar_nivel(nivel):
     niveis = {
@@ -93,17 +106,14 @@ def processar_nivel(nivel):
         "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
         "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
     }
-    return niveis.get(str(nivel).strip().upper(), "[NÍVEL TEXTO NÃO DEFINIDO]")
+    return niveis.get(str(nivel).strip().upper(), " [ NÍVEL TEXTO - EDITAR MANUAL ] ")
 
 def extrair_classe_e_modelo(row):
     class_ol = str(row.get('class_ol', '')).strip().title()
     class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
     
-    vol_str = str(row.get('vol_char', '0')).lower().replace("m3", "").replace("m³", "").strip()
-    try:
-        vol_num = float(vol_str.replace(',', '.'))
-    except (ValueError, TypeError):
-        vol_num = 0.0
+    # Executa o cálculo usando a variável numérica isolada
+    vol_num = extrair_volume_numerico(row.get('vol_char', '0'))
 
     letra_risco = "A"
     if "B" in class_risco_bruto: letra_risco = "B"
@@ -135,7 +145,7 @@ def preencher_documento(caminho_modelo, dicionario_dados):
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
                 p.text = p.text.replace(chave, str(valor))
-        # Aplica o realce após o parágrafo consolidar o novo texto estruturado
+        # Aplica o realce de marca-texto restrito às palavras modificadas
         if "EDITAR MANUAL" in p.text:
             for chave, valor in dicionario_dados.items():
                 if "EDITAR MANUAL" in str(valor):
@@ -255,20 +265,13 @@ if df_original is not None and not df_original.empty:
                 def tratar_tag(valor, nome_tag):
                     v_str = str(valor).strip()
                     if pd.isna(valor) or v_str in ["", "nan", "None", "0", "Processo Não Encontrado"]:
-                        return f" [{nome_tag.upper()} - EDITAR MANUAL] "
-                    # Captura o termo fora do ar de forma definitiva
+                        return f" [ {nome_tag.upper()} - EDITAR MANUAL ] "
                     if nome_tag == "siema" and "fora do ar" in v_str.lower():
-                        return " [SIEMA FORA DO AR - EDITAR MANUAL] "
+                        return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
                     return v_str
 
                 grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
-                if "NÃO DEFINIDA" in grandeza_texto:
-                    grandeza_texto = " [GRANDEZA TEXTO - EDITAR MANUAL] "
-                    grandeza_pontos = " [PONTOS GRANDEZA - EDITAR MANUAL] "
-
                 nivel_texto = processar_nivel(row.get('nivel', ''))
-                if "NÃO DEFINIDO" in nivel_texto:
-                    nivel_texto = " [NÍVEL TEXTO - EDITAR MANUAL] "
 
                 risco_final = letra_risco_detectada if letra_risco_detectada else tratar_tag(row.get('class_risco', ''), "class_risco")
 
@@ -286,7 +289,7 @@ if df_original is not None and not df_original.empty:
                     "<<produto>>": tratar_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": tratar_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco_final,
-                    "<<vol_char>>": limpar_e_formatar_volume(row.get('vol_char', '0')),
+                    "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')), # Injeta a variável String no Word
                     "<<auto>>": tratar_tag(row.get('auto', ''), "auto_infracao"),
                     "<<multa_num>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
                     "<<multa_char>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
