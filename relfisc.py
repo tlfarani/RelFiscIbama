@@ -6,10 +6,13 @@ from docx.oxml.ns import nsdecls
 import io
 import os
 import requests
+import re
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
-# --- FUNÇÃO AUXILIAR PARA DESTACAR EM AMARELO NO WORD ---
+# --- FUNÇÕES AUXILIARES DE TRATAMENTO ---
+
 def destacar_texto_amarelo(p, texto_procurado, texto_substituto):
     """
     Substitui o texto em um parágrafo e aplica um destaque (shading) amarelo 
@@ -23,6 +26,48 @@ def destacar_texto_amarelo(p, texto_procurado, texto_substituto):
             if texto_substituto in run.text:
                 shading_xml = f'<w:shd {nsdecls("w")} w:fill="FFFF00"/>'
                 run._r.get_or_add_rPr().append(parse_xml(shading_xml))
+
+def converter_data_excel(valor):
+    """
+    Detecta se a data veio como número sequencial do Excel (ex: 45961)
+    e converte para string DD/MM/AAAA. Se já for string, tenta padronizar.
+    """
+    val_str = str(valor).strip()
+    if not val_str or val_str in ["nan", "None", "0"]:
+        return " [DATA - EDITAR MANUAL] "
+        
+    # Se forem apenas dígitos (Número de série do Excel)
+    if val_str.isdigit():
+        try:
+            dias = int(val_str)
+            # O Excel erroneamente assume que 1900 foi ano bissexto, por isso subtrai-se 2 dias
+            data_real = datetime(1900, 1, 1) + timedelta(days=dias - 2)
+            return data_real.strftime("%d/%m/%Y")
+        except:
+            pass
+            
+    # Tenta limpar e retornar formato ISO se já vier como string de data incompleta
+    return val_str
+
+def limpar_e_formatar_volume(valor):
+    """
+    Extrai apenas o valor numérico de colunas poluídas como '0,0000010m3' 
+    e devolve formatado no padrão decimal brasileiro.
+    """
+    val_str = str(valor).strip().lower()
+    if not val_str or val_str in ["nan", "None", "0"]:
+        return "0"
+        
+    # Remove 'm3', 'm³' ou espaços extras se houver
+    val_limpo = val_str.replace("m3", "").replace("m³", "").strip()
+    
+    try:
+        v = val_limpo.replace(",", ".")
+        f = float(v)
+        return f"{f:g}".replace(".", ",")
+    except ValueError:
+        # Se falhar, retorna a string limpa original para não perder informação
+        return val_limpo.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -57,28 +102,16 @@ def processar_nivel(nivel):
     }
     return niveis.get(str(nivel).strip().upper(), "[NÍVEL TEXTO NÃO DEFINIDO]")
 
-def formatar_decimal(valor):
-    try:
-        v = str(valor).replace(",", ".")
-        f = float(v)
-        return f"{f:g}".replace(".", ",")
-    except ValueError:
-        return str(valor)
-
 def extrair_classe_e_modelo(row):
-    """
-    Analisa a linha e retorna uma tupla (nome_do_modelo, letra_do_risco_detectada)
-    Garante o alinhamento perfeito entre o modelo escolhido e a tag gravada no Word.
-    """
     class_ol = str(row.get('class_ol', '')).strip().title()
     class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
     
+    vol_str = str(row.get('vol_char', '0')).lower().replace("m3", "").replace("m³", "").strip()
     try:
-        vol_num = float(str(row.get('vol_char', '0')).replace(',', '.'))
+        vol_num = float(vol_str.replace(',', '.'))
     except (ValueError, TypeError):
         vol_num = 0.0
 
-    # Determina a letra de risco de forma resiliente
     letra_risco = "A"
     if "B" in class_risco_bruto: letra_risco = "B"
     elif "C" in class_risco_bruto: letra_risco = "C"
@@ -229,6 +262,9 @@ if df_original is not None and not df_original.empty:
                     v_str = str(valor).strip()
                     if pd.isna(valor) or v_str in ["", "nan", "None", "0", "Processo Não Encontrado"]:
                         return f" [{nome_tag.upper()} - EDITAR MANUAL] "
+                    # Se o SIEMA estiver como fora do ar, força o marcador amarelo
+                    if nome_tag == "siema" and "fora do ar" in v_str.lower():
+                        return " [SIEMA FORA DO AR - EDITAR MANUAL] "
                     return v_str
 
                 grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
@@ -240,14 +276,13 @@ if df_original is not None and not df_original.empty:
                 if "NÃO DEFINIDO" in nivel_texto:
                     nivel_texto = " [NÍVEL TEXTO - EDITAR MANUAL] "
 
-                # Vincula a classe de risco de forma integrada com a detecção do modelo anterior
                 risco_final = letra_risco_detectada if letra_risco_detectada else tratar_tag(row.get('class_risco', ''), "class_risco")
 
                 dados_replace = {
                     "<<siema>>": tratar_tag(row.get('siema', ''), "siema"),
                     "<<processo_sei>>": tratar_tag(row.get('processo_sei', ''), "processo_sei"),
                     "<<laudo_sei>>": tratar_tag(row.get('laudo_sei', ''), "laudo_sei").split('.')[0],
-                    "<<data_acid>>": tratar_tag(row.get('data_acid', ''), "data_acidente"),
+                    "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
                     "<<relat_sei>>": tratar_tag(row.get('relat_sei', ''), "raipo_sei"),
                     "<<instalacao>>": tratar_tag(row.get('instalacao', ''), "instalacao"),
                     "<<campo>>": tratar_tag(row.get('campo', ''), "campo"),
@@ -257,11 +292,11 @@ if df_original is not None and not df_original.empty:
                     "<<produto>>": tratar_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": tratar_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco_final,
-                    "<<vol_char>>": formatar_decimal(row.get('vol_char', '0')),
+                    "<<vol_char>>": limpar_e_formatar_volume(row.get('vol_char', '0')),
                     "<<auto>>": tratar_tag(row.get('auto', ''), "auto_infracao"),
                     "<<multa_num>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
                     "<<multa_char>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
-                    "<<data_ai>>": tratar_tag(row.get('data_ai', ''), "data_ai"),
+                    "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
                     "<<jurisdicao>>": determinar_jurisdicao(str(row.get('bacia', ''))),
                     "<<lat_auto>>": tratar_tag(row.get('lat', ''), "lat"),
                     "<<lon_auto>>": tratar_tag(row.get('lon', ''), "lon"),
