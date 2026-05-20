@@ -242,7 +242,7 @@ if df_original is not None and not df_original.empty:
 
     st.markdown("### 📋 Processos para Análise")
 
-    # Invocação direta do st.data_editor nativo, delegando a alternância estrita de linhas para o CSS injetado
+    # Invocação direta do st.data_editor nativo com a ordenação ativa
     tabela_editada = st.data_editor(
         df_exib,
         hide_index=True,
@@ -256,7 +256,7 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     selecionados = df_f.iloc[indices_selecionados]
 
-    if not全面 selecionados.empty:
+    if not database_empty_check := selecionados.empty:  # <-- STRING CORRIGIDA AQUI!
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
