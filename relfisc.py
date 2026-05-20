@@ -27,7 +27,7 @@ def converter_data_excel(valor):
     return val_str
 
 def extrair_volume_numerico(valor):
-    """ Utilizado estritamente para os testes logados de limiares dos modelos """
+    """ Utilizado estritamente para os testes de limiares dos modelos """
     if pd.isna(valor):
         return 0.0
     try:
@@ -37,9 +37,8 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING DEFINITIVA: Formata floats normais e científicos abrindo até 7 casas decimais.
-    Usa Expressão Regular (Regex) para remover os zeros excedentes de forma segura,
-    sem nunca apagar o número inteiro principal (evitando o erro do volume sumir).
+    VARIÁVEL STRING: Formata floats normais e científicos abrindo até 7 casas decimais.
+    Usa Expressão Regular (Regex) para remover os zeros excedentes de forma segura.
     """
     if pd.isna(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
@@ -229,6 +228,40 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     df_selecionados = df_filtrado.iloc[indices_selecionados]
     
+    # --- NOVO BLOCO DE DEBUG (PASSO A PASSO NA TELA) ---
+    if not df_selecionados.empty:
+        st.write("---")
+        with st.expander("🔍 PAINEL DE DEBUG TÉCNICO (Verifique os dados em tempo real)", expanded=True):
+            st.info("Este painel mostra exatamente como as funções do Python enxergam as colunas polêmicas antes do Word ser gerado.")
+            for idx, row in df_selecionados.iterrows():
+                st.markdown(f"**Análise do Processo ID:** `{row['num_doc']}` | **SIEMA:** `{row['siema']}`")
+                
+                # Coleta os valores brutos mapeados
+                vol_bruto = row.get('vol_char', 'NÃO ENCONTRADO')
+                class_ol_bruta = row.get('class_ol', 'NÃO ENCONTRADO')
+                class_risco_bruta = row.get('class_risco', 'NÃO ENCONTRADO')
+                
+                # Executa os tratamentos do script
+                v_num = extrair_volume_numerico(vol_bruto)
+                v_txt = extrair_volume_texto(vol_bruto)
+                mod_detectado, risco_detectado = extrair_classe_e_modelo(row)
+                
+                # Cospe na tela em formato de tabela limpa para diagnóstico
+                st.json({
+                    "1. Dados Brutos do SharePoint (Como vieram)": {
+                        "Conteúdo na Coluna 'VOL.'": str(vol_bruto),
+                        "Conteúdo na Coluna 'CLASS_OL'": str(class_ol_bruta),
+                        "Conteúdo na Coluna 'CLASS. RISCO'": str(class_risco_bruta)
+                    },
+                    "2. Resultados das Conversões (Como o Python tratou)": {
+                        "Volume Numérico (usado nos Limiares >8 ou >200)": v_num,
+                        "Volume Texto (o que vai substituir a tag <<vol_char>>)": v_txt,
+                        "Modelo de arquivo Word escolhido pelo script": str(mod_detectado),
+                        "Letra de Risco capturada pelo script": str(risco_detectado)
+                    }
+                })
+    # ----------------------------------------------------
+
     st.write("---")
     st.subheader("Ações de Geração")
     
