@@ -1,310 +1,64 @@
-import streamlit as st
-import pandas as pd
-from docx import Document
-from docx.enum.text import WD_COLOR_INDEX
-import io
-import os
-import requests
-from datetime import datetime, timedelta
-
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
-
-# --- PALETA DE CORES INTEGRAL (CSS CUSTOMIZADO) ---
-# Verde Musgo: #4E5D30 | Verde Escuro Escopo: #3A471E | Cinza Claro/Fundo: #F8F9F9 | Verde Claro Linhas: #E9EDDE
+# --- PALETA DE CORES INTEGRAL (CSS BLINDADO CONTRA DARK MODE) ---
 st.markdown("""
     <style>
-    /* 1. Estilo Geral e Fundo do Aplicativo */
+    /* 1. Forçar o Fundo Geral do App para Cinza Claro */
     .stApp {
-        background-color: #F8F9F9;
+        background-color: #F8F9F9 !important;
     }
     
-    /* 2. Títulos, Subtítulos e Textos de Seção */
-    h1, h2, h3, .stSubheader, p, span, label {
+    /* 2. Títulos, Subtítulos e Rótulos de Filtros em Verde Musgo */
+    h1, h2, h3, .stSubheader, p, span, label, [data-testid="stWidgetLabel"] p {
         color: #4E5D30 !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
     }
 
-    /* 3. Botão Principal de Geração (Verde Musgo com texto claro) */
-    div.stButton > button:first-child {
-        background-color: #4E5D30 !important;
-        color: #F2F2F2 !important;
-        border-radius: 8px !important;
-        border: 1px solid #4E5D30 !important;
-        padding: 10px 24px !important;
-        font-weight: bold !important;
-        transition: all 0.3s ease !important;
-    }
-    div.stButton > button:first-child:hover {
-        background-color: #3A471E !important;
-        color: #FFFFFF !important;
-        border-color: #3A471E !important;
-        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08) !important;
-    }
-
-    /* 4. Estilização dos Containers de Filtro e Caixas Brancas */
-    [data-testid="stBlock"] {
-        background-color: #FFFFFF;
-        border-radius: 8px;
+    /* 3. Forçar o Fundo das Caixas de Seleção (Filtros) para Branco com texto Preto */
+    div[data-baseweb="select"] > div {
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        border-color: #E9EDDE !important;
     }
     
-    /* 5. Customização das tags internas do Multiselect */
+    /* Input interno do texto digitado nos filtros */
+    div[data-baseweb="select"] input {
+        color: #000000 !important;
+    }
+    
+    /* Menu suspenso de opções dos filtros */
+    ul[role="listbox"] {
+        background-color: #FFFFFF !important;
+    }
+    ul[role="listbox"] li {
+        color: #000000 !important;
+    }
+
+    /* 4. Customização das tags internas escolhidas no Multiselect */
     span[data-baseweb="tag"] {
         background-color: #E9EDDE !important;
         color: #4E5D30 !important;
         border: 1px solid #4E5D30 !important;
     }
-    
-    /* Icone de fechar do multiselect */
-    span[data-baseweb="tag"] role[button] svg {
-        fill: #4E5D30 !important;
+
+    /* 5. Forçar a visibilidade do Texto do Botão de Geração */
+    div.stButton > button:first-child {
+        background-color: #4E5D30 !important;
+        color: #FFFFFF !important; /* Força o texto a ficar Branco */
+        border-radius: 8px !important;
+        border: 1px solid #4E5D30 !important;
+        padding: 10px 24px !important;
+        font-weight: bold !important;
+    }
+    div.stButton > button:first-child p {
+        color: #FFFFFF !important; /* Garante que o parágrafo interno do botão seja branco */
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #3A471E !important;
+        border-color: #3A471E !important;
     }
 
-    /* 6. Cor do Checkbox Ativo (Sobrescrevendo a cor padrão do Streamlit) */
-    input[type="checkbox"]:checked {
-        background-color: #4E5D30 !important;
-        border-color: #4E5D30 !important;
-    }
-    
-    /* 7. Ajustes finos nos cards/containers de borda */
-    div[data-testid="stElementContainer"] div[style*="border"] {
-        border-color: #E9EDDE !important;
+    /* 6. Texto do Checkbox Lateral */
+    div[data-testid="stCheckbox"] span {
+        color: #4E5D30 !important;
     }
     </style>
 """, unsafe_allow_html=True)
-
-# --- FUNÇÕES DE TRATAMENTO ---
-
-def converter_data_excel(valor):
-    val_str = str(valor).strip()
-    if not val_str or val_str in ["nan", "None", "0"]:
-        return " [ DATA - EDITAR MANUAL ] "
-    if val_str.isdigit():
-        try:
-            dias = int(val_str)
-            data_real = datetime(1900, 1, 1) + timedelta(days=dias - 2)
-            return data_real.strftime("%d/%m/%Y")
-        except: pass
-    return val_str
-
-def extrair_volume_numerico(valor):
-    if pd.isna(valor): return 0.0
-    try: return float(str(valor).strip().replace(",", "."))
-    except ValueError: return 0.0
-
-def extrair_volume_texto(valor):
-    if pd.isna(valor) or str(valor).strip() == "": return " [ VOLUME - EDITAR MANUAL ] "
-    val_str = str(valor).strip().lower()
-    try:
-        num_float = float(val_str.replace(",", "."))
-        if num_float == 0.0: return "0"
-        texto_formatado = f"{num_float:.7f}"
-        if "." in texto_formatado:
-            texto_formatado = texto_formatado.rstrip('0').rstrip('.')
-        return texto_formatado.replace(".", ",")
-    except ValueError: return val_str.replace(".", ",")
-
-def processar_grandeza(grandeza):
-    g = str(grandeza).strip().title()
-    tabela = {
-        "Potencial": ("quando as consequências não são evidentes", "5"),
-        "Reduzida": ("quando os danos ambientais são locais ou temporários", "15"),
-        "Fraca": ("quando os danos ambientais são de pequena proporção ou de baixa complexidade, gravidade ou magnitude, diante do contexto considerado", "30"),
-        "Moderada": ("quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"),
-        "Grave": ("quando os danos ambientais são de grande proporção ou de alta complexidade, gravidade ou magnitude, diante do contexto considerado", "70")
-    }
-    return tabela.get(g, (" [ GRANDEZA TEXTO - EDITAR MANUAL ] ", " [ PONTOS GRANDEZA - EDITAR MANUAL ] "))
-
-def processar_nivel(nivel):
-    niveis = {
-        "A": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 150 mil a 10 milhões de reais (Mínimo + 0,3% a 20% do teto)",
-        "B": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 5 milhões a 15 milhões de reais (Mínimo + 10% a 30% do teto)",
-        "C": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 15,5 milhões a 25 milhões de reais (Mínimo + 31% a 50% do teto)",
-        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
-        "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
-    }
-    return niveis.get(str(nivel).strip().upper(), " [ NÍVEL TEXTO - EDITAR MANUAL ] ")
-
-def extrair_classe_e_modelo(row):
-    class_ol = str(row.get('class_ol', '')).strip().title()
-    class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
-    vol_num = extrair_volume_numerico(row.get('vol_char', '0'))
-    letra_risco = "A"
-    for r in ["B", "C", "D", "E"]:
-        if r in class_risco_bruto: letra_risco = r; break
-
-    if "Oleoso" in class_ol and "Não" not in class_ol:
-        return f"Rel_Fisc_Oleoso_{letra_risco}.docx" if letra_risco in ["A", "B", "D"] else "Rel_Fisc_Oleoso_A.docx", letra_risco
-    
-    if "Não Oleoso" in class_ol or "Nao Oleoso" in class_ol:
-        if letra_risco == "A": return ("Rel_Fisc_Nao_Oleoso_Art_61_A.docx" if vol_num > 8 else "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"), "A"
-        if letra_risco == "B": return ("Rel_Fisc_Nao_Oleoso_Art_61_B.docx" if vol_num > 200 else "Rel_Fisc_Nao_Oleoso_Art_62_B.docx"), "B"
-        if letra_risco == "D": return "Rel_Fisc_Nao_Oleoso_Art_62_D.docx", "D"
-        return "Rel_Fisc_Nao_Oleoso_Art_62_A.docx", "A"
-    return None, None
-
-def preencher_documento(caminho_modelo, dicionario_dados):
-    doc = Document(caminho_modelo)
-    def tratar_p(p):
-        for chave, valor in dicionario_dados.items():
-            if chave in p.text: p.text = p.text.replace(chave, str(valor))
-        if "[" in p.text and "]" in p.text:
-            for run in p.runs: run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            
-    for p in doc.paragraphs: tratar_p(p)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs: tratar_p(p)
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-# --- INTERFACE ---
-st.title("⚖️ Fila de Fiscalização - IBAMA")
-
-@st.cache_data(ttl=300) 
-def carregar_dados_sharepoint():
-    try:
-        url = st.secrets["sharepoint"]["url_planilha"]
-        headers = {"Content-Type": "application/json"}
-        resposta = requests.post(url, headers=headers, json={})
-        resposta.raise_for_status()
-        dados_json = resposta.json()
-        if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
-        elif isinstance(dados_json, list): lista = dados_json
-        else: return None
-        return pd.DataFrame(lista)
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
-        return None
-
-df_original = carregar_dados_sharepoint()
-
-if df_original is not None and not df_original.empty:
-    df = df_original.copy()
-    
-    colunas_map = {
-        'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'SITUACAO': 'situacao',
-        'LAUDO_SEI': 'laudo_sei', 'DATA_ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
-        'INSTALACAO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
-        'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS_RISCO': 'class_risco',
-        'VOL': 'vol_char', 'Lat_Auto': 'lat', 'Lon_Auto': 'lon', 'Grandeza': 'grandeza',
-        'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
-        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal'
-    }
-    
-    for col_real, col_interna in colunas_map.items():
-        if col_real in df.columns: df[col_interna] = df[col_real]
-        else: df[col_interna] = ""
-
-    # --- FILTROS ---
-    with st.container(border=True):
-        st.markdown("**🔍 Painel de Filtros**")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            op_situ = sorted(df['situacao'].astype(str).unique())
-            sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
-        with c2:
-            df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
-            op_fisc = sorted(df['f_limpo'].unique())
-            sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
-        with c3:
-            todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
-
-    df_f = df.copy()
-    if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
-    if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
-    if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
-
-    df_f = df_f.reset_index(drop=True)
-
-    # --- PREPARAÇÃO DA TABELA ---
-    df_exib = pd.DataFrame({
-        "Selecionar": [False] * len(df_f),
-        "ID": df_f['num_doc'].astype(str),
-        "SITUAÇÃO": df_f['situacao'].astype(str),
-        "Fiscal": df_f['f_limpo'].astype(str),
-        "Data": [converter_data_excel(d) for d in df_f['data_acid']],
-        "Produto": df_f['produto'].astype(str),
-        "Class OL": df_f['class_ol'].astype(str),
-        "Risco": df_f['class_risco'].astype(str),
-        "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
-        "Multa Prev": df_f['multa_prevista'].astype(str),
-        "Lat": df_f['lat'].astype(str),
-        "Lon": df_f['lon'].astype(str)
-    })
-
-    st.markdown("### 📋 Processos para Análise")
-    
-    tabela_editada = st.data_editor(
-        df_exib,
-        hide_index=True,
-        use_container_width=True,
-        disabled=[col for col in df_exib.columns if col != "Selecionar"],
-        column_config={
-            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
-        }
-    )
-    
-    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
-    selecionados = df_f.iloc[indices_selecionados]
-
-    if not selecionados.empty:
-        st.write("---")
-        st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
-        
-        if st.button("Gerar Documentos Word"):
-            for _, row in selecionados.iterrows():
-                modelo, risco = extrair_classe_e_modelo(row)
-                if not modelo:
-                    st.error(f"Erro no modelo para ID {row['num_doc']}")
-                    continue
-                
-                caminho = os.path.join("modelos", modelo)
-                if not os.path.exists(caminho):
-                    st.error(f"Arquivo {modelo} não encontrado.")
-                    continue
-
-                def t_tag(v, n):
-                    v_s = str(v).strip()
-                    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]:
-                        return f" [ {n.upper()} - EDITAR MANUAL ] "
-                    if n == "siema" and "fora do ar" in v_s.lower():
-                        return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
-                    return v_s
-
-                g_txt, g_pt = processar_grandeza(row.get('grandeza', ''))
-                
-                dados = {
-                    "<<siema>>": t_tag(row.get('siema', ''), "siema"),
-                    "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
-                    "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
-                    "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
-                    "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                    "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
-                    "<<campo>>": t_tag(row.get('campo', ''), "campo"),
-                    "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
-                    "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                    "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
-                    "<<produto>>": t_tag(row.get('produto', ''), "produto"),
-                    "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
-                    "<<class_risco>>": risco,
-                    "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
-                    "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
-                    "<<grandeza_texto>>": g_txt,
-                    "<<grandeza_pontos>>": g_pt,
-                    "<<nivel_texto>>": processar_nivel(row.get('nivel', '')),
-                    "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
-                }
-                
-                doc_io = preencher_documento(caminho, dados)
-                nome = f"Rel_Fisc_{row['num_doc']}.docx"
-                
-                with st.container(border=True):
-                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    st.download_button(label="Baixar Relatório", data=doc_io, file_name=nome, key=f"dl_{row['num_doc']}")
-else:
-    st.info("Aguardando carregamento dos dados do SharePoint...")
