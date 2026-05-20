@@ -5,6 +5,7 @@ from docx.enum.text import WD_COLOR_INDEX
 import io
 import os
 import requests
+import zipfile
 from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -27,8 +28,8 @@ st.markdown("""
         border: 1px solid #4E5D30 !important;
     }
 
-    /* 3. Estilização Firme do Botão de Geração */
-    div.stButton > button:first-child {
+    /* 3. Estilização Firme dos Botões */
+    div.stButton > button:first-child, div.stDownloadButton > button:first-child {
         background-color: #4E5D30 !important;
         color: #FFFFFF !important;
         border-radius: 8px !important;
@@ -36,10 +37,10 @@ st.markdown("""
         padding: 10px 24px !important;
         font-weight: bold !important;
     }
-    div.stButton > button:first-child p {
+    div.stButton > button:first-child p, div.stDownloadButton > button:first-child p {
         color: #FFFFFF !important;
     }
-    div.stButton > button:first-child:hover {
+    div.stButton > button:first-child:hover, div.stDownloadButton > button:first-child:hover {
         background-color: #3A471E !important;
         border-color: #3A471E !important;
     }
@@ -231,9 +232,16 @@ if df_original is not None and not df_original.empty:
 
     df_f = df_f.reset_index(drop=True)
 
+    # --- CONTROLE DE SELEÇÃO EM MASSA (MÁGICA REATIVA) ---
+    st.markdown("### 📋 Processos para Análise")
+    
+    # Checkbox Mestre: Seu valor padrão determina o estado inicial do vetor de seleção
+    marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
+    vetor_selecao_inicial = [marcar_todos] * len(df_f)
+
     # --- PREPARAÇÃO DA BASE DE EXIBIÇÃO ---
     df_exib = pd.DataFrame({
-        "Selecionar": [False] * len(df_f),
+        "Selecionar": vetor_selecao_inicial, # Recebe dinamicamente True ou False baseado no checkbox de cima
         "ID": df_f['num_doc'].astype(str),
         "SITUAÇÃO": df_f['situacao'].astype(str),
         "Fiscal": df_f['f_limpo'].astype(str),
@@ -247,17 +255,16 @@ if df_original is not None and not df_original.empty:
         "Lon": df_f['lon'].astype(str)
     })
 
-    st.markdown("### 📋 Processos para Análise")
-
-    # Invocação direta do st.data_editor nativo com a ordenação ativa
+    # Invocação direta do st.data_editor nativo com a ordenação e a seleção em massa ativas
     tabela_editada = st.data_editor(
         df_exib,
         hide_index=True,
         use_container_width=True,
         disabled=[col for col in df_exib.columns if col != "Selecionar"],
         column_config={
-            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
-        }
+            "Selecionar": st.column_config.CheckboxColumn("Selecionar")
+        },
+        key=f"editor_{marcar_todos}" # Força o reset do componente de visualização quando o checkbox mudar de estado
     )
     
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
@@ -267,24 +274,21 @@ if df_original is not None and not df_original.empty:
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
-        if st.button("Gerar Documentos Word"):
+        # --- LÓGICA DE COMPACTAÇÃO EM ZIP (EM MEMÓRIA) ---
+        zip_buffer = io.BytesIO()
+        arquivos_para_zipar = 0
+        
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for _, row in selecionados.iterrows():
                 modelo, risco = extrair_classe_e_modelo(row)
-                if not modelo:
-                    st.error(f"Erro no modelo para ID {row['num_doc']}")
-                    continue
+                if not modelo: continue
                 
                 caminho = os.path.join("modelos", modelo)
-                if not os.path.exists(caminho):
-                    st.error(f"Arquivo {modelo} não encontrado.")
-                    continue
+                if not os.path.exists(caminho): continue
 
                 def t_tag(v, n):
                     v_s = str(v).strip()
-                    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]:
-                        return f" [ {n.upper()} - EDITAR MANUAL ] "
-                    if n == "siema" and "fora do ar" in v_s.lower():
-                        return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
+                    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {n.upper()} - EDITAR MANUAL ] "
                     return v_s
 
                 g_txt, g_pt = processar_grandeza(row.get('grandeza', ''))
@@ -313,10 +317,68 @@ if df_original is not None and not df_original.empty:
                 }
                 
                 doc_io = preencher_documento(caminho, dados)
-                nome = f"Rel_Fisc_{row['num_doc']}.docx"
+                nome_arquivo = f"Rel_Fisc_{row['num_doc']}.docx"
                 
-                with st.container(border=True):
-                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    st.download_button(label="Baixar Relatório", data=doc_io, file_name=nome, key=f"dl_{row['num_doc']}")
+                zip_file.writestr(nome_arquivo, doc_io.getvalue())
+                arquivos_para_zipar += 1
+
+        zip_buffer.seek(0)
+        
+        # Se houver mais de um arquivo válido gerado, exibe o super-botão de download unificado
+        if arquivos_para_zipar > 1:
+            st.markdown("### 📦 Download Unificado")
+            st.download_button(
+                label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
+                data=zip_buffer,
+                file_name=f"relatorios_ibama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+            st.write("---")
+
+        # Exibição individual logo abaixo
+        st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
+        for _, row in selecionados.iterrows():
+            modelo, risco = extrair_classe_e_modelo(row)
+            if not modelo: continue
+            
+            caminho = os.path.join("modelos", modelo)
+            if not os.path.exists(caminho): continue
+
+            def t_tag(v, n):
+                v_s = str(v).strip()
+                if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {n.upper()} - EDITAR MANUAL ] "
+                return v_s
+
+            g_txt, g_pt = processar_grandeza(row.get('grandeza', ''))
+            dados_unitarios = {
+                "<<siema>>": t_tag(row.get('siema', ''), "siema"),
+                "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
+                "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
+                "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
+                "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
+                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                "<<campo>>": t_tag(row.get('campo', ''), "campo"),
+                "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
+                "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
+                "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                "<<produto>>": t_tag(row.get('produto', ''), "produto"),
+                "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
+                "<<class_risco>>": risco,
+                "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
+                "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
+                "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
+                "<<grandeza_texto>>": g_txt,
+                "<<grandeza_pontos>>": g_pt,
+                "<<nivel_texto>>": processar_nivel(row.get('nivel', '')),
+                "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
+            }
+            
+            doc_io_unitario = preencher_documento(caminho, dados_unitarios)
+            nome = f"Rel_Fisc_{row['num_doc']}.docx"
+            
+            with st.container(border=True):
+                st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+                st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
