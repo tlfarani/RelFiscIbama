@@ -305,4 +305,6 @@ if df_original is not None and not df_original.empty:
                 
                 with st.container(border=True):
                     st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    st.download_button(label="Baixar Relatório", data=doc_io, file_
+                    st.download_button(label="Baixar Relatório", data=doc_io, file_name=nome, key=f"dl_{row['num_doc']}")
+else:
+    st.info("Aguardando carregamento dos dados do SharePoint...")
