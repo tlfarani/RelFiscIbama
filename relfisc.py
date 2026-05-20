@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
 
-# --- MOTOR DE ESTILIZAÇÃO AGRESSIVA (ENGANANDO O DATA_EDITOR) ---
+# --- AJUSTES FINOS DE CSS EM ADENDO AO TEMA ---
 st.markdown("""
     <style>
     /* 1. Títulos e Subtítulos em Verde Musgo */
@@ -42,23 +42,6 @@ st.markdown("""
     div.stButton > button:first-child:hover {
         background-color: #3A471E !important;
         border-color: #3A471E !important;
-    }
-
-    /* 4. INJEÇÃO HACK: Forçando o Canvas da Tabela a Adotar a Paleta Verde Musgo e Linhas Alternadas */
-    :root {
-        --theme-primary-color: #4E5D30;
-    }
-    
-    /* Pinta o cabeçalho do bloco de dados de Verde Musgo */
-    div[data-testid="stDataEditor"] canvas {
-        filter: hue-rotate(45deg) saturate(1.1); /* Ajuste dinâmico de tom se necessário */
-    }
-
-    /* Garante que o container da tabela respeite a alternância clara */
-    div[data-testid="stDataEditor"] {
-        background-color: #FFFFFF !important;
-        border: 1px solid #D1D5DB !important;
-        border-radius: 8px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -110,7 +93,7 @@ def processar_nivel(nivel):
         "A": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 150 mil a 10 milhões de reais (Mínimo + 0,3% a 20% do teto)",
         "B": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 5 milhões a 15 milhões de reais (Mínimo + 10% a 30% do teto)",
         "C": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 15,5 milhões a 25 milhões de reais (Mínimo + 31% a 50% do teto)",
-        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, approximately, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
+        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
         "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
     }
     return niveis.get(str(nivel).strip().upper(), " [ NÍVEL TEXTO - EDITAR MANUAL ] ")
@@ -210,7 +193,7 @@ if df_original is not None and not df_original.empty:
 
     df_f = df_f.reset_index(drop=True)
 
-    # --- PREPARAÇÃO DA TABELA NATIVA INTERATIVA ---
+    # --- PREPARAÇÃO DA BASE DE EXIBIÇÃO ---
     df_exib = pd.DataFrame({
         "Selecionar": [False] * len(df_f),
         "ID": df_f['num_doc'].astype(str),
@@ -228,9 +211,17 @@ if df_original is not None and not df_original.empty:
 
     st.markdown("### 📋 Processos para Análise")
     
-    # Voltamos ao st.data_editor nativo, mas agora ele respeita o config.toml claro
+    # 🌟 FUNÇÃO DE ESTILIZAÇÃO ZEBRADA INSPIRADA NO SEU APP AUXILIAR:
+    # Alterna dinamicamente entre Verde Claro (#E9EDDE) e Branco (#FFFFFF) com texto Preto
+    def estilar_linhas_zebradas_ibama(linha):
+        cor_fundo = "#E9EDDE" if linha.name % 2 == 0 else "#FFFFFF"
+        return [f'background-color: {cor_fundo}; color: #000000;' for _ in linha]
+        
+    df_estilizado = df_exib.style.apply(estilar_linhas_zebradas_ibama, axis=1)
+
+    # st.data_editor nativo recebendo o dataframe estilizado de forma reativa e mantendo a ordenação!
     tabela_editada = st.data_editor(
-        df_exib,
+        df_estilizado,
         hide_index=True,
         use_container_width=True,
         disabled=[col for col in df_exib.columns if col != "Selecionar"],
@@ -239,7 +230,6 @@ if df_original is not None and not df_original.empty:
         }
     )
     
-    # Captura os índices marcados via checkbox de forma reativa e dinâmica
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     selecionados = df_f.iloc[indices_selecionados]
 
