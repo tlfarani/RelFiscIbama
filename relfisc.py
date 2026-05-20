@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
 
 # --- PALETA DE CORES (CSS) ---
-# Verde Musgo: #4E5D30 | Cinza Claro: #F2F2F2 | Branco: #FFFFFF | Verde Bem Claro: #E9EDDE
+# Verde Musgo: #4E5D30 | Cinza Claro: #F2F2F2 | Branco: #FFFFFF
 st.markdown("""
     <style>
     /* Estilo Geral do App */
@@ -45,13 +45,8 @@ st.markdown("""
         background-color: #FFFFFF;
         border-radius: 5px;
     }
-
-    /* Customização do Data Editor (via CSS para containers) */
-    [data-testid="stTable"] {
-        background-color: white;
-    }
     </style>
-""", unsafe_allow_stdio=True)
+""", unsafe_allow_html=True) # <-- CORRIGIDO AQUI!
 
 # --- FUNÇÕES DE TRATAMENTO ---
 
@@ -89,19 +84,19 @@ def processar_grandeza(grandeza):
     tabela = {
         "Potencial": ("quando as consequências não são evidentes", "5"),
         "Reduzida": ("quando os danos ambientais são locais ou temporários", "15"),
-        "Fraca": ("quando os danos ambientais são de pequena proporção...", "30"),
-        "Moderada": ("quando os danos ambientais são de proporção intermediária...", "50"),
-        "Grave": ("quando os danos ambientais são de grande proporção...", "70")
+        "Fraca": ("quando os danos ambientais são de pequena proporção ou de baixa complexidade, gravidade ou magnitude, diante do contexto considerado", "30"),
+        "Moderada": ("quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"),
+        "Grave": ("quando os danos ambientais são de grande proporção ou de alta complexidade, gravidade ou magnitude, diante do contexto considerado", "70")
     }
     return tabela.get(g, (" [ GRANDEZA TEXTO - EDITAR MANUAL ] ", " [ PONTOS GRANDEZA - EDITAR MANUAL ] "))
 
 def processar_nivel(nivel):
     niveis = {
-        "A": "Multa de aprox. 150 mil a 10 milhões (Grande porte)",
-        "B": "Multa de aprox. 5 milhões a 15 milhões (Grande porte)",
-        "C": "Multa de aprox. 15,5 milhões a 25 milhões (Grande porte)",
-        "D": "Multa de aprox. 25,5 milhões a 37,5 milhões (Grande porte)",
-        "E": "Multa de aprox. 38 milhões a 50 milhões (Grande porte)"
+        "A": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 150 mil a 10 milhões de reais (Mínimo + 0,3% a 20% do teto)",
+        "B": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 5 milhões a 15 milhões de reais (Mínimo + 10% a 30% do teto)",
+        "C": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 15,5 milhões a 25 milhões de reais (Mínimo + 31% a 50% do teto)",
+        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
+        "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
     }
     return niveis.get(str(nivel).strip().upper(), " [ NÍVEL TEXTO - EDITAR MANUAL ] ")
 
@@ -187,7 +182,7 @@ if df_original is not None and not df_original.empty:
             op_situ = sorted(df['situacao'].astype(str).unique())
             sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
         with c2:
-            df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído"})
+            df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
             op_fisc = sorted(df['f_limpo'].unique())
             sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
         with c3:
@@ -198,42 +193,38 @@ if df_original is not None and not df_original.empty:
     if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
     if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
 
-    # --- PREPARAÇÃO DA TABELA ESTILIZADA ---
+    df_f = df_f.reset_index(drop=True)
+
+    # --- PREPARAÇÃO DA TABELA ---
     df_exib = pd.DataFrame({
         "Selecionar": [False] * len(df_f),
-        "ID": df_f['num_doc'],
-        "SITUAÇÃO": df_f['situacao'],
-        "Fiscal": df_f['f_limpo'],
+        "ID": df_f['num_doc'].astype(str),
+        "SITUAÇÃO": df_f['situacao'].astype(str),
+        "Fiscal": df_f['f_limpo'].astype(str),
         "Data": [converter_data_excel(d) for d in df_f['data_acid']],
-        "Produto": df_f['produto'],
-        "Class OL": df_f['class_ol'],
-        "Risco": df_f['class_risco'],
+        "Produto": df_f['produto'].astype(str),
+        "Class OL": df_f['class_ol'].astype(str),
+        "Risco": df_f['class_risco'].astype(str),
         "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
-        "Multa Prev": df_f['multa_prevista'],
-        "Lat": df_f['lat'],
-        "Lon": df_f['lon']
+        "Multa Prev": df_f['multa_prevista'].astype(str),
+        "Lat": df_f['lat'].astype(str),
+        "Lon": df_f['lon'].astype(str)
     })
-
-    # Aplicando estilização visual nas cores solicitadas
-    # Cabeçalho: Verde Musgo / Linhas: Alternado Verde Claro e Branco
-    def style_rows(s):
-        return ['background-color: #E9EDDE; color: black' if i % 2 == 0 else 'background-color: #FFFFFF; color: black' for i in range(len(s))]
 
     st.markdown("### 📋 Processos para Análise")
     
-    # Exibe a tabela interativa
     tabela_editada = st.data_editor(
         df_exib,
         hide_index=True,
         use_container_width=True,
         disabled=[col for col in df_exib.columns if col != "Selecionar"],
         column_config={
-            "Selecionar": st.column_config.CheckboxColumn("Selo", default=False),
-            "ID": st.column_config.Column(width="small")
+            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
         }
     )
     
-    selecionados = df_f.iloc[tabela_editada[tabela_editada["Selecionar"] == True].index]
+    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
+    selecionados = df_f.iloc[indices_selecionados]
 
     if not selecionados.empty:
         st.write("---")
@@ -287,7 +278,8 @@ if df_original is not None and not df_original.empty:
                 doc_io = preencher_documento(caminho, dados)
                 nome = f"Rel_Fisc_{row['num_doc']}.docx"
                 
-                with st.expander(f"📥 ID {row['num_doc']} - {row['empresa'][:30]}...", expanded=True):
+                with st.container(border=True):
+                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
                     st.download_button(label="Baixar Relatório", data=doc_io, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
