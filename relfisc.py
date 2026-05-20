@@ -26,6 +26,7 @@ def converter_data_excel(valor):
     return val_str
 
 def extrair_volume_numerico(valor):
+    """ Utilizado estritamente para os testes lógicos de limiares dos modelos """
     if pd.isna(valor):
         return 0.0
     try:
@@ -37,8 +38,8 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING: Converte floats e notações científicas garantindo a exibição
-    de até 7 casas decimais sem arredondar para 0.
+    VARIÁVEL STRING DEFINITIVA: Evita conversões científicas indesejadas do Python
+    e garante que o número decimal longo apareça exatamente como está na planilha.
     """
     if pd.isna(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
@@ -48,24 +49,21 @@ def extrair_volume_texto(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
         
     try:
-        # Força conversão para float para limpar a notação científica do Excel
+        # Se o Pandas leu como float em notação científica (ex: 1e-06),
+        # esta linha força a conversão de volta para string decimal com até 7 casas
         num_float = float(val_str.replace(",", "."))
-        
-        if num_float == 0.0:
-            return "0"
-            
-        # Formata com até 7 casas decimais fixas
-        texto_formatado = f"{num_float:.7f}"
-        
-        # Remove zeros desnecessários à direita, mas mantém se fizer parte do decimal original
-        if "." in texto_formatado:
+        if num_float < 1.0 and num_float > 0:
+            texto_formatado = f"{num_float:.7f}"
+            # Remove apenas os zeros inúteis após a sétima casa decimal, mantendo o padrão correto
             texto_formatado = texto_formatado.rstrip('0')
             if texto_formatado.endswith('.'):
                 texto_formatado = texto_formatado[:-1]
-                
-        return texto_formatado.replace(".", ",")
+            return texto_formatado.replace(".", ",")
     except ValueError:
-        return val_str.replace(".", ",")
+        pass
+        
+    # Fallback: se já for uma string estruturada correta, retorna com a vírgula brasileira
+    return val_str.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -131,20 +129,18 @@ def extrair_classe_e_modelo(row):
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
-    # LÓGICA INICIAL RETOMADA: Substituição direta no p.text + realce total do parágrafo
-    
-    # 1. Substituição em Parágrafos normais
+    # 1. Substituição e Realce em Parágrafos normais
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
                 p.text = p.text.replace(chave, str(valor))
         
-        # Se após as substituições o parágrafo contiver um alerta, realça ele todo
+        # LÓGICA INICIAL RETOMADA: Se houver um alerta, realça o parágrafo inteiro
         if "[" in p.text and "]" in p.text:
             for run in p.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 
-    # 2. Substituição em Tabelas estruturadas
+    # 2. Substituição e Realce em Tabelas estruturadas
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
