@@ -5,6 +5,7 @@ from docx.enum.text import WD_COLOR_INDEX
 import io
 import os
 import requests
+import re
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
@@ -26,7 +27,7 @@ def converter_data_excel(valor):
     return val_str
 
 def extrair_volume_numerico(valor):
-    """ Utilizado para os testes de limiares dos modelos """
+    """ Utilizado estritamente para os testes logados de limiares dos modelos """
     if pd.isna(valor):
         return 0.0
     try:
@@ -36,30 +37,34 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING CORRIGIDA: Trata o float puramente numérico (mesmo científico tipo 1e-06),
-    forçando a abertura de até 7 casas decimais e aplicando a vírgula brasileira.
+    VARIÁVEL STRING DEFINITIVA: Formata floats normais e científicos abrindo até 7 casas decimais.
+    Usa Expressão Regular (Regex) para remover os zeros excedentes de forma segura,
+    sem nunca apagar o número inteiro principal (evitando o erro do volume sumir).
     """
     if pd.isna(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
         
+    val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
+    if not val_str or val_str in ["nan", "none"]:
+        return " [ VOLUME - EDITAR MANUAL ] "
+        
     try:
-        num_float = float(str(valor).strip().replace(",", "."))
+        num_float = float(val_str.replace(",", "."))
         
         if num_float == 0.0:
             return "0"
             
-        # Força formatação decimal estrita com até 7 casas decimais
-        texto_formatado = f"{num_float:.7f}"
+        # Força formatação decimal estrita fixando 7 casas na memória
+        res_texto = f"{num_float:.7f}"
         
-        # Remove os zeros excedentes à direita que o Python adiciona para preencher as 7 casas
-        if "." in texto_formatado:
-            texto_formatado = texto_formatado.rstrip('0')
-            if texto_formatado.endswith('.'):
-                texto_formatado = texto_formatado[:-1]
-                
-        return texto_formatado.replace(".", ",")
+        # Remove com segurança apenas os zeros finais decimais mantendo a integridade do inteiro
+        if "." in res_texto:
+            res_texto = re.sub(r'0+$', '', res_texto)  # Remove zeros à direita
+            res_texto = re.sub(r'\.$', '', res_texto)  # Se sobrou o ponto sozinho no fim, remove
+            
+        return res_texto.replace(".", ",")
     except ValueError:
-        return str(valor).strip().replace(".", ",")
+        return val_str.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -98,7 +103,6 @@ def extrair_classe_e_modelo(row):
     class_ol = str(row.get('class_ol', '')).strip().title()
     class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
     
-    # Processa o volume puramente numérico
     vol_num = extrair_volume_numerico(row.get('vol_char', '0'))
 
     letra_risco = "A"
@@ -132,7 +136,6 @@ def preencher_documento(caminho_modelo, dicionario_dados):
             if chave in p.text:
                 p.text = p.text.replace(chave, str(valor))
         
-        # Se contiver marcadores de erro, destaca todo o parágrafo de forma estável
         if "[" in p.text and "]" in p.text:
             for run in p.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -185,7 +188,6 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # Mapeamento estrito associando as colunas oficiais informadas
     colunas_map = {
         'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'Situação': 'situacao',
         'Laudo Válido (SEI)': 'laudo_sei', 'DATA ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
