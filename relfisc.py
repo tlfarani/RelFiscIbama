@@ -3,6 +3,7 @@ import pandas as pd
 from docx import Document
 import io
 import os
+import requests
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
@@ -97,45 +98,45 @@ def preencher_documento(caminho_modelo, dicionario_dados):
 
 st.title("⚖️ Força Tarefa - Geração de Autos e Relatórios")
 
-st.markdown("""
-Nesta versão, faça o upload da planilha Excel de controle. 
-No futuro, este sistema será conectado diretamente ao SharePoint.
-""")
+# --- CARREGAMENTO AUTOMÁTICO VIA URL DOS SEGREDOs ---
+@st.cache_data(ttl=300) # Atualiza os dados do SharePoint a cada 5 minutos
+def carregar_dados_sharepoint():
+    try:
+        # Puxa a URL criptografada/escondida nos segredos do Streamlit
+        url = st.secrets["sharepoint"]["url_planilha"]
+        
+        # Se for um link direto de download ou compartilhado aberto
+        if "download=1" not in url and "sharepoint.com" in url:
+            # Pequeno ajuste comum para forçar o download direto de links do SharePoint
+            if "?" in url:
+                url = url.split("?")[0] + "?download=1"
+            else:
+                url = url + "?download=1"
+                
+        resposta = requests.get(url)
+        resposta.raise_for_status()
+        
+        # Lê os dados da aba correta
+        df = pd.read_excel(io.BytesIO(resposta.content), sheet_name="Processos_FT", header=0)
+        return df
+    except Exception as e:
+        st.error(f"Erro ao conectar ou ler a planilha do SharePoint: {e}")
+        return None
 
-arquivo_excel = st.file_uploader("Envie a planilha de controle (.xlsm ou .xlsx)", type=["xlsx", "xlsm"])
+# Tentando carregar a base de dados em segundo plano
+df_original = carregar_dados_sharepoint()
 
-if arquivo_excel:
-    df = pd.read_excel(arquivo_excel, sheet_name="Processos_FT", header=0)
+if df_original is not None:
+    df = df_original.copy()
     
-    # --- ATUALIZAÇÃO DOS ÍNDICES DAS COLUNAS ---
-    # A coluna 1 virou ID (índice 0). A coluna 2 foi excluída.
-    # Todos os índices após o 0 caíram 1 posição em relação à versão anterior.
+    # Mapeamento atualizado considerando o ID e a remoção da coluna 2
     colunas_map = {
-        0: 'num_doc',      # Antiga coluna 1 (agora "ID")
-        1: 'processo_sei', # Era 2, caiu para 1
-        2: 'gerar_rel',    # Era 3, caiu para 2
-        3: 'siema',        # Era 4, caiu para 3
-        6: 'situacao',     # Era 7, caiu para 6
-        8: 'laudo_sei',    # Era 9, caiu para 8
-        10: 'data_acid',   # Era 11, caiu para 10
-        11: 'relat_sei',   # Era 12, caiu para 11
-        13: 'instalacao',  # Era 14, caiu para 13
-        14: 'campo',       # Era 15, caiu para 14
-        15: 'bacia',       # Era 16, caiu para 15
-        16: 'empresa',     # Era 17, caiu para 16
-        17: 'cnpj',        # Era 18, caiu para 17
-        18: 'produto',     # Era 19, caiu para 18
-        19: 'class_ol',    # Era 20, caiu para 19
-        20: 'class_risco', # Era 21, caiu para 20
-        21: 'vol_char',    # Era 22, caiu para 21
-        23: 'lat',         # Era 24, caiu para 23
-        24: 'lon',         # Era 25, caiu para 24
-        28: 'grandeza',    # Era 29, caiu para 28
-        31: 'nivel_pontos',# Era 32, caiu para 31
-        32: 'nivel',       # Era 33, caiu para 32
-        33: 'auto',        # Era 34, caiu para 33
-        34: 'multa_char',  # Era 35, caiu para 34
-        35: 'data_ai'      # Era 36, caiu para 35
+        0: 'num_doc', 1: 'processo_sei', 2: 'gerar_rel', 3: 'siema', 
+        6: 'situacao', 8: 'laudo_sei', 10: 'data_acid', 11: 'relat_sei', 
+        13: 'instalacao', 14: 'campo', 15: 'bacia', 16: 'empresa', 
+        17: 'cnpj', 18: 'produto', 19: 'class_ol', 20: 'class_risco', 
+        21: 'vol_char', 23: 'lat', 24: 'lon', 28: 'grandeza', 
+        31: 'nivel_pontos', 32: 'nivel', 33: 'auto', 34: 'multa_char', 35: 'data_ai'
     }
     
     nomes_colunas = df.columns.tolist()
@@ -144,7 +145,7 @@ if arquivo_excel:
             nomes_colunas[indice] = nome_novo
     df.columns = nomes_colunas
     
-    st.subheader("Processos Pendentes")
+    st.subheader("Processos Pendentes (Base SharePoint)")
     
     df_filtrado = df.dropna(subset=['siema'])
     df_filtrado = df_filtrado[
@@ -226,3 +227,5 @@ if arquivo_excel:
                         file_name=nome_arquivo_saida,
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
+else:
+    st.info("Aguardando configuração ou carregamento correto da URL da planilha.")
