@@ -186,7 +186,7 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # MAPEAMENTO SEGURO E ALINHADO COM A COLUNA "VOL"
+    # MAPEAMENTO ALINHADO COM OS SEUS NOVOS NOMES REAIS NO SHAREPOINT
     colunas_map = {
         'ID': 'num_doc',
         'PROCESSO': 'processo_sei',
@@ -203,7 +203,7 @@ if df_original is not None and not df_original.empty:
         'PRODUTO': 'produto',
         'CLASS_OL': 'class_ol',
         'CLASS_RISCO': 'class_risco',
-        'VOL': 'vol_char', # Mapeamento direto sem o ponto final
+        'VOL': 'vol_char',
         'Lat_Auto': 'lat',
         'Lon_Auto': 'lon',
         'Grandeza': 'grandeza',
@@ -245,6 +245,38 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     df_selecionados = df_filtrado.iloc[indices_selecionados]
     
+    # --- BLOCO DE DEBUG TÉCNICO RETORNADO ---
+    if not df_selecionados.empty:
+        st.write("---")
+        with st.expander("🔍 PAINEL DE DEBUG TÉCNICO (Nomes de Colunas Atualizados)", expanded=True):
+            st.info("Monitore aqui se as colunas 'VOL' e 'CLASS_RISCO' estão chegando preenchidas do SharePoint.")
+            for idx, row in df_selecionados.iterrows():
+                st.markdown(f"**Análise do Processo ID:** `{row['num_doc']}`")
+                
+                vol_bruto = row.get('vol_char', 'NÃO MAPEADO')
+                class_ol_bruta = row.get('class_ol', 'NÃO MAPEADO')
+                class_risco_bruta = row.get('class_risco', 'NÃO MAPEADO')
+                
+                v_num = extrair_volume_numerico(vol_bruto)
+                v_txt = extrair_volume_texto(vol_bruto)
+                mod_detectado, risco_detectado = extrair_classe_e_modelo(row)
+                
+                st.json({
+                    "1. Colunas lidas pelo Python da Planilha do SharePoint": {
+                        "Conteúdo na Coluna 'VOL'": str(vol_bruto),
+                        "Conteúdo na Coluna 'CLASS_OL'": str(class_ol_bruta),
+                        "Conteúdo na Coluna 'CLASS_RISCO'": str(class_risco_bruta)
+                    },
+                    "2. Resultados do Processamento Interno": {
+                        "Volume Numérico (Limiares)": v_num,
+                        "Volume Texto (Relatório Word)": v_txt,
+                        "Modelo de Word Selecionado": str(mod_detectado),
+                        "Letra de Risco Detectada": str(risco_detectado)
+                    },
+                    "3. Todas as Colunas Disponíveis vindas do Power Automate": list(df.columns)
+                })
+    # ----------------------------------------
+
     st.write("---")
     st.subheader("Ações de Geração")
     
