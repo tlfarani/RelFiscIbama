@@ -5,7 +5,6 @@ from docx.enum.text import WD_COLOR_INDEX
 import io
 import os
 import requests
-import re
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
@@ -27,7 +26,7 @@ def converter_data_excel(valor):
     return val_str
 
 def extrair_volume_numerico(valor):
-    """ Utilizado estritamente para os testes de limiares dos modelos """
+    """ Utilizado estritamente para os testes lógicos de limiares dos modelos """
     if pd.isna(valor):
         return 0.0
     try:
@@ -37,18 +36,33 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING: Se o SharePoint enviar o dado preenchido, 
-    garante a exibição correta com vírgula, sem sumir com decimais.
+    VARIÁVEL STRING: Converte floats e notações científicas garantindo a exibição
+    de até 7 casas decimais sem arredondar para 0 e aplicando a vírgula brasileira.
     """
     if pd.isna(valor) or str(valor).strip() == "":
         return " [ VOLUME - EDITAR MANUAL ] "
         
-    val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
+    val_str = str(valor).strip().lower()
     if val_str in ["nan", "none"]:
         return " [ VOLUME - EDITAR MANUAL ] "
         
-    # Inverte ponto por vírgula para manter o padrão brasileiro de relatórios
-    return val_str.replace(".", ",")
+    try:
+        num_float = float(val_str.replace(",", "."))
+        if num_float == 0.0:
+            return "0"
+            
+        # Formata com até 7 casas decimais fixas
+        texto_formatado = f"{num_float:.7f}"
+        
+        # Remove zeros desnecessários à direita de forma segura
+        if "." in texto_formatado:
+            texto_formatado = texto_formatado.rstrip('0')
+            if texto_formatado.endswith('.'):
+                texto_formatado = texto_formatado[:-1]
+                
+        return texto_formatado.replace(".", ",")
+    except ValueError:
+        return val_str.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -114,7 +128,7 @@ def extrair_classe_e_modelo(row):
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
-    # 1. Substituição e Realce Total em Parágrafos normais
+    # 1. Substituição direta no p.text + realce total do parágrafo se houver alertas
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
@@ -124,7 +138,7 @@ def preencher_documento(caminho_modelo, dicionario_dados):
             for run in p.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 
-    # 2. Substituição e Realce Total em Tabelas estruturadas
+    # 2. Substituição e Realce Total dentro de tabelas estruturadas
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -172,14 +186,32 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
+    # MAPEAMENTO SEGURO E ALINHADO COM A COLUNA "VOL"
     colunas_map = {
-        'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'Situação': 'situacao',
-        'Laudo Válido (SEI)': 'laudo_sei', 'DATA ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
-        'INSTALAÇÃO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
-        'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS. RISCO': 'class_risco',
-        'VOL.': 'vol_char', 'Lat_Auto': 'lat', 'Lon_Auto': 'lon', 'Grandeza': 'grandeza',
-        'Nivel_Pontos': 'nivel_pontos', 'Nivel': 'nivel', 'Auto Infração': 'auto',
-        'Multa Aplicada': 'multa_char', 'Data_AI': 'data_ai'
+        'ID': 'num_doc',
+        'PROCESSO': 'processo_sei',
+        'SIEMA': 'siema',
+        'SITUACAO': 'situacao',
+        'LAUDO_SEI': 'laudo_sei',
+        'DATA_ACIDENTE': 'data_acid',
+        'RAIPO_SEI': 'relat_sei',
+        'INSTALACAO': 'instalacao',
+        'Campo': 'campo',
+        'Bacia': 'bacia',
+        'EMPRESA': 'empresa',
+        'CNPJ': 'cnpj',
+        'PRODUTO': 'produto',
+        'CLASS_OL': 'class_ol',
+        'CLASS_RISCO': 'class_risco',
+        'VOL': 'vol_char', # Mapeamento direto sem o ponto final
+        'Lat_Auto': 'lat',
+        'Lon_Auto': 'lon',
+        'Grandeza': 'grandeza',
+        'Nivel_Pontos': 'nivel_pontos',
+        'Nivel': 'nivel',
+        'AUTO_INFRACAO': 'auto',
+        'MULTA_APLICADA': 'multa_char',
+        'DATA_AI': 'data_ai'
     }
     
     for col_real, col_interna in colunas_map.items():
@@ -213,40 +245,6 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     df_selecionados = df_filtrado.iloc[indices_selecionados]
     
-    # --- NOVO BLOCO DE DEBUG (PASSO A PASSO NA TELA) ---
-    if not df_selecionados.empty:
-        st.write("---")
-        with st.expander("🔍 PAINEL DE DEBUG TÉCNICO (Verifique os dados em tempo real)", expanded=True):
-            st.info("Este painel mostra exatamente como as funções do Python enxergam as colunas polêmicas antes do Word ser gerado.")
-            for idx, row in df_selecionados.iterrows():
-                st.markdown(f"**Análise do Processo ID:** `{row['num_doc']}` | **SIEMA:** `{row['siema']}`")
-                
-                # Coleta os valores brutos mapeados
-                vol_bruto = row.get('vol_char', 'NÃO ENCONTRADO')
-                class_ol_bruta = row.get('class_ol', 'NÃO ENCONTRADO')
-                class_risco_bruta = row.get('class_risco', 'NÃO ENCONTRADO')
-                
-                # Executa os tratamentos do script
-                v_num = extrair_volume_numerico(vol_bruto)
-                v_txt = extrair_volume_texto(vol_bruto)
-                mod_detectado, risco_detectado = extrair_classe_e_modelo(row)
-                
-                # Cospe na tela em formato de tabela limpa para diagnóstico
-                st.json({
-                    "1. Dados Brutos do SharePoint (Como vieram)": {
-                        "Conteúdo na Coluna 'VOL.'": str(vol_bruto),
-                        "Conteúdo na Coluna 'CLASS_OL'": str(class_ol_bruta),
-                        "Conteúdo na Coluna 'CLASS. RISCO'": str(class_risco_bruta)
-                    },
-                    "2. Resultados das Conversões (Como o Python tratou)": {
-                        "Volume Numérico (usado nos Limiares >8 ou >200)": v_num,
-                        "Volume Texto (o que vai substituir a tag <<vol_char>>)": v_txt,
-                        "Modelo de arquivo Word escolhido pelo script": str(mod_detectado),
-                        "Letra de Risco capturada pelo script": str(risco_detectado)
-                    }
-                })
-    # ----------------------------------------------------
-
     st.write("---")
     st.subheader("Ações de Geração")
     
