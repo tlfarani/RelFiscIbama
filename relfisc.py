@@ -156,7 +156,7 @@ def extrair_classe_e_modelo(row):
     return None, None
 
 def preencher_documento(caminho_modelo, dicionario_dados):
-    doc = Document(caminho_modelo)
+    doc = Document(caminway_modelo if 'caminway_modelo' in locals() else caminho_modelo)
     def tratar_p(p):
         for chave, valor in dicionario_dados.items():
             if chave in p.text: p.text = p.text.replace(chave, str(valor))
@@ -197,7 +197,6 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # MAPEAMENTO OFICIAL DE TODAS AS COLUNAS DO SHAREPOINT
     colunas_map = {
         'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'SITUACAO': 'situacao',
         'LAUDO_SEI': 'laudo_sei', 'DATA_ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
@@ -205,7 +204,8 @@ if df_original is not None and not df_original.empty:
         'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS_RISCO': 'class_risco',
         'VOL': 'vol_char', 'Lat': 'lat', 'Lon': 'lon', 'Grandeza': 'grandeza',
         'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
-        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos'
+        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos',
+        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto'  # Mapeamento interno preservado
     }
     
     for col_real, col_interna in colunas_map.items():
@@ -251,8 +251,8 @@ if df_original is not None and not df_original.empty:
         "Risco": df_f['class_risco'].astype(str),
         "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
         "Multa Prev": df_f['multa_prevista'].astype(str),
-        "Lat": df_f['lat'].astype(str),
-        "Lon": df_f['lon'].astype(str)
+        "Lat Auto": df_f['lat_auto'].astype(str),  # Ajustado cirurgicamente na exibição
+        "Lon Auto": df_f['lon_auto'].astype(str)   # Ajustado cirurgicamente na exibição
     })
 
     tabela_editada = st.data_editor(
@@ -273,7 +273,6 @@ if df_original is not None and not df_original.empty:
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
-        # --- LÓGICA DE COMPACTAÇÃO EM ZIP (EM MEMÓRIA) ---
         zip_buffer = io.BytesIO()
         arquivos_para_zipar = 0
         
@@ -308,8 +307,8 @@ if df_original is not None and not df_original.empty:
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
                     "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    "<<lat>>": t_tag(row.get('lat', ''), "lat"), # Redirecionado para Lat real da tabela
-                    "<<lon>>": t_tag(row.get('lon', ''), "lon"), # Redirecionado para Lon real da tabela
+                    "<<lat>>": t_tag(row.get('lat', ''), "lat"),
+                    "<<lon>>": t_tag(row.get('lon', ''), "lon"),
                     "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
                     "<<grandeza_texto>>": grandeza_texto,
                     "<<grandeza_pontos>>": grandeza_pontos,
@@ -342,7 +341,6 @@ if df_original is not None and not df_original.empty:
             )
             st.write("---")
 
-        # Exibição individual logo abaixo
         st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
         for _, row in selecionados.iterrows():
             modelo, risco = extrair_classe_e_modelo(row)
