@@ -6,67 +6,60 @@ from docx.oxml.ns import nsdecls
 import io
 import os
 import requests
-import re
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
 # --- FUNÇÕES AUXILIARES DE TRATAMENTO ---
 
-def destacar_texto_amarelo(p, texto_procurado, texto_substituto):
+def destacar_texto_amarelo(p, texto_substituto):
     """
-    Substitui o texto em um parágrafo e aplica um destaque (shading) amarelo 
-    diretamente no XML do Word se o campo estiver marcado para revisão manual.
+    Procura o texto substituto inserido no parágrafo e aplica um destaque 
+    (shading) amarelo diretamente no XML do Word para revisão manual.
     """
-    if texto_procurado in p.text:
-        p.text = p.text.replace(texto_procurado, texto_substituto)
-        
-        # Percorre os fragmentos de texto (runs) para aplicar o realce em amarelo onde o texto substituto foi inserido
-        for run in p.runs:
-            if texto_substituto in run.text:
-                shading_xml = f'<w:shd {nsdecls("w")} w:fill="FFFF00"/>'
-                run._r.get_or_add_rPr().append(parse_xml(shading_xml))
+    for run in p.runs:
+        if texto_substituto in run.text:
+            shading_xml = f'<w:shd {nsdecls("w")} w:fill="FFFF00"/>'
+            run._r.get_or_add_rPr().append(parse_xml(shading_xml))
 
 def converter_data_excel(valor):
-    """
-    Detecta se a data veio como número sequencial do Excel (ex: 45961)
-    e converte para string DD/MM/AAAA. Se já for string, tenta padronizar.
-    """
     val_str = str(valor).strip()
     if not val_str or val_str in ["nan", "None", "0"]:
         return " [DATA - EDITAR MANUAL] "
         
-    # Se forem apenas dígitos (Número de série do Excel)
     if val_str.isdigit():
         try:
             dias = int(val_str)
-            # O Excel erroneamente assume que 1900 foi ano bissexto, por isso subtrai-se 2 dias
             data_real = datetime(1900, 1, 1) + timedelta(days=dias - 2)
             return data_real.strftime("%d/%m/%Y")
         except:
             pass
-            
-    # Tenta limpar e retornar formato ISO se já vier como string de data incompleta
     return val_str
 
 def limpar_e_formatar_volume(valor):
     """
-    Extrai apenas o valor numérico de colunas poluídas como '0,0000010m3' 
-    e devolve formatado no padrão decimal brasileiro.
+    Garante a extração correta de volumes extremamente pequenos (até 7 casas decimais)
+    mesmo que estejam poluídos com strings como 'm3' ou convertidos em notação científica.
     """
     val_str = str(valor).strip().lower()
     if not val_str or val_str in ["nan", "None", "0"]:
-        return "0"
+        return " [VOLUME - EDITAR MANUAL] "
         
-    # Remove 'm3', 'm³' ou espaços extras se houver
+    # Limpa unidades coladas no texto
     val_limpo = val_str.replace("m3", "").replace("m³", "").strip()
     
     try:
+        # Corrige o padrão de vírgula flutuante
         v = val_limpo.replace(",", ".")
         f = float(v)
-        return f"{f:g}".replace(".", ",")
+        
+        # Formata explicitamente exibindo até 7 casas decimais e remove os zeros inúteis à direita
+        texto_formatado = f"{f:.7f}".rstrip('0')
+        if texto_formatado.endswith('.'):
+            texto_formatado = texto_formatado[:-1]
+            
+        return texto_formatado.replace(".", ",")
     except ValueError:
-        # Se falhar, retorna a string limpa original para não perder informação
         return val_limpo.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
@@ -137,26 +130,29 @@ def extrair_classe_e_modelo(row):
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
-    # Processa substituições e realces em parágrafos comuns
+    # 1. Faz as substituições em parágrafos comuns
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
+                p.text = p.text.replace(chave, str(valor))
+        # Aplica o realce após o parágrafo consolidar o novo texto estruturado
+        if "EDITAR MANUAL" in p.text:
+            for chave, valor in dicionario_dados.items():
                 if "EDITAR MANUAL" in str(valor):
-                    destacar_texto_amarelo(p, chave, str(valor))
-                else:
-                    p.text = p.text.replace(chave, str(valor))
+                    destacar_texto_amarelo(p, str(valor))
                 
-    # Processa substituições e realces dentro de tabelas estruturadas
+    # 2. Faz as substituições dentro de tabelas estruturadas
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     for chave, valor in dicionario_dados.items():
                         if chave in p.text:
+                            p.text = p.text.replace(chave, str(valor))
+                    if "EDITAR MANUAL" in p.text:
+                        for chave, valor in dicionario_dados.items():
                             if "EDITAR MANUAL" in str(valor):
-                                destacar_texto_amarelo(p, chave, str(valor))
-                            else:
-                                p.text = p.text.replace(chave, str(valor))
+                                destacar_texto_amarelo(p, str(valor))
     
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -193,7 +189,6 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # Mapeamento estrito das colunas oficiais informadas
     colunas_map = {
         'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'Situação': 'situacao',
         'Laudo Válido (SEI)': 'laudo_sei', 'DATA ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
@@ -257,12 +252,11 @@ if df_original is not None and not df_original.empty:
                     st.error(f"Arquivo '{modelo_arquivo}' ausente na pasta 'modelos/'.")
                     continue
                 
-                # Tratamento inteligência para tags normais
                 def tratar_tag(valor, nome_tag):
                     v_str = str(valor).strip()
                     if pd.isna(valor) or v_str in ["", "nan", "None", "0", "Processo Não Encontrado"]:
                         return f" [{nome_tag.upper()} - EDITAR MANUAL] "
-                    # Se o SIEMA estiver como fora do ar, força o marcador amarelo
+                    # Captura o termo fora do ar de forma definitiva
                     if nome_tag == "siema" and "fora do ar" in v_str.lower():
                         return " [SIEMA FORA DO AR - EDITAR MANUAL] "
                     return v_str
