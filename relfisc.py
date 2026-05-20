@@ -126,48 +126,112 @@ def carregar_dados_sharepoint():
         st.error(f"Erro ao processar os dados recebidos: {e}")
         return None
 
-# Tentando carregar a base de dados em segundo plano
+# Tentando carregar a base de dados
 df_original = carregar_dados_sharepoint()
 
-if df_original is not None:
+if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # Mapeamento atualizado considerando o ID e a remoção da coluna 2
-    colunas_map = {
-        0: 'num_doc', 1: 'processo_sei', 2: 'gerar_rel', 3: 'siema', 
-        6: 'situacao', 8: 'laudo_sei', 10: 'data_acid', 11: 'relat_sei', 
-        13: 'instalacao', 14: 'campo', 15: 'bacia', 16: 'empresa', 
-        17: 'cnpj', 18: 'produto', 19: 'class_ol', 20: 'class_risco', 
-        21: 'vol_char', 23: 'lat', 24: 'lon', 28: 'grandeza', 
-        31: 'nivel_pontos', 32: 'nivel', 33: 'auto', 34: 'multa_char', 35: 'data_ai'
+    # 1. Limpeza e normalização dos nomes das colunas vindas do Power Automate
+    # Remove espaços, acentos comuns e caracteres estranhos de codificação do SharePoint
+    def normalizar_nome_coluna(col):
+        c = str(col).lower().strip()
+        c = c.replace("_x0020_", "").replace(" ", "").replace("_", "")
+        c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        c = c.replace("ã", "a").replace("õ", "o").replace("ç", "c").replace("ê", "e")
+        return c
+
+    colunas_reais = {normalizar_nome_coluna(c): c for c in df.columns}
+    
+    # Mapeamento inteligente por aproximação de nome
+    mapeamento_alvo = {
+        'id': 'num_doc',
+        'processosei': 'processo_sei',
+        'gerarrel': 'gerar_rel',
+        'siema': 'siema',
+        'situacao': 'situacao',
+        'laudosei': 'laudo_sei',
+        'dataacid': 'data_acid',
+        'relatsei': 'relat_sei',
+        'instalacao': 'instalacao',
+        'campo': 'campo',
+        'bacia': 'bacia',
+        'empresa': 'empresa',
+        'cnpj': 'cnpj',
+        'produto': 'produto',
+        'classol': 'class_ol',
+        'classrisco': 'class_risco',
+        'volchar': 'vol_char',
+        'lat': 'lat',
+        'lon': 'lon',
+        'grandeza': 'grandeza',
+        'nivelpontos': 'nivel_pontos',
+        'nivel': 'nivel',
+        'auto': 'auto',
+        'multachar': 'multa_char',
+        'dataai': 'data_ai'
     }
     
-    nomes_colunas = df.columns.tolist()
-    for indice, nome_novo in colunas_map.items():
-        if indice < len(nomes_colunas):
-            nomes_colunas[indice] = nome_novo
-    df.columns = nomes_colunas
+    # Cria as colunas normatizadas que o app espera para rodar as regras de negócio
+    for chave_normalizada, col_interna in mapeamento_alvo.items():
+        # Procura se existe alguma coluna na planilha que bate com a nossa chave
+        col_encontrada = None
+        for k_real in colunas_reais.keys():
+            if chave_normalizada in k_real or k_real in chave_normalizada:
+                col_encontrada = colunas_reais[k_real]
+                break
+                
+        if col_encontrada:
+            df[col_interna] = df[col_encontrada]
+        else:
+            df[col_interna] = ""
+
+    # Tratamento especial para o ID (num_doc) caso ele venha como objeto/dicionário do SharePoint
+    def limpar_id(val):
+        if isinstance(val, dict):
+            return str(val.get('Value', val.get('Id', list(val.values())[0])))
+        return str(val)
     
+    df['num_doc'] = df['num_doc'].apply(limpar_id)
+
+    # --- RENDERIZAÇÃO DA INTERFACE ---
     st.subheader("Processos Pendentes (Base SharePoint)")
     
-    df_filtrado = df.dropna(subset=['siema'])
+    # Garantindo tratamento correto de strings para os filtros não falharem por espaços vazios
+    df['siema'] = df['siema'].astype(str).str.strip()
+    df['laudo_sei'] = df['laudo_sei'].astype(str).str.strip()
+    df['gerar_rel'] = df['gerar_rel'].astype(str).str.strip()
+    
+    # Filtro da força-tarefa
+    df_filtrado = df[df['siema'] != 'nan']
     df_filtrado = df_filtrado[
-        (df_filtrado['laudo_sei'].notna()) & 
-        (df_filtrado['laudo_sei'].astype(str) != '0') &
-        (df_filtrado['gerar_rel'] == 'Sim')
+        (df_filtrado['laudo_sei'] != '') & 
+        (df_filtrado['laudo_sei'] != '0') & 
+        (df_filtrado['laudo_sei'] != 'nan') &
+        (df_filtrado['gerar_rel'].str.lower() == 'sim')
     ]
     
     if df_filtrado.empty:
         st.success("Não há processos na fila de geração no momento!")
+        st.info("💡 Dica: Verifique se na sua planilha do SharePoint existem linhas onde a coluna 'Gerar Rel' está exatamente como 'Sim' e a coluna 'Laudo SEI' está preenchida.")
+        
+        # Se estiver em modo de teste, mostra as colunas detectadas para ajudar o administrador
+        with st.expander("Ver diagnóstico técnico de colunas recebidas"):
+            st.write("Colunas originais vindas do Power Automate:", list(df_original.columns))
+            st.write("Amostra das primeiras linhas brutas:", df_original.head(2))
     else:
+        # Exibe os dados limpos para os fiscais
         colunas_resumo = ['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia']
-        st.dataframe(df_filtrado[colunas_resumo])
+        # Remove colunas duplicadas se houver
+        df_exibicao = df_filtrado[colunas_resumo].loc[:, ~df_filtrado[colunas_resumo].columns.duplicated()]
+        st.dataframe(df_exibicao)
         
         st.write("---")
         st.subheader("Gerar Relatório")
         
         opcoes_processos = df_filtrado['siema'].astype(str) + " - " + df_filtrado['empresa'].astype(str)
-        processo_selecionado = st.selectbox("Selecione o processo para gerar o relatório:", opcoes_processos)
+        opcoes_unique = opcoes_processos.drop_duplicates().tolist()
+        processo_selecionado = st.selectbox("Selecione o processo para gerar o relatório:", opcoes_unique)
         
         if st.button("Gerar Documento Word"):
             siema_alvo = processo_selecionado.split(" - ")[0]
@@ -176,12 +240,12 @@ if df_original is not None:
             modelo_arquivo = selecionar_modelo(row)
             
             if not modelo_arquivo:
-                st.error("Não foi possível determinar o modelo para este processo. Verifique as classes de risco e tipo na planilha.")
+                st.error("Não foi possível determinar o modelo para este processo. Verifique se as classes de risco e tipo estão preenchidas corretamente.")
             else:
                 caminho_modelo = os.path.join("modelos", modelo_arquivo)
                 
                 if not os.path.exists(caminho_modelo):
-                    st.error(f"O modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'.")
+                    st.error(f"O modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'. Certifique-se de adicioná-lo ao GitHub.")
                 else:
                     grandeza_texto, grandeza_pontos = processar_grandeza(str(row.get('grandeza', '')))
                     
@@ -216,14 +280,12 @@ if df_original is not None:
                     }
                     
                     for k, v in dados_replace.items():
-                        if v == "nan": dados_replace[k] = ""
+                        if v == "nan" or v == "None": dados_replace[k] = ""
                     
                     doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
-                    
                     nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', '')}.docx"
                     
                     st.success("Relatório gerado com sucesso!")
-                    
                     st.download_button(
                         label="📥 Baixar Relatório Word",
                         data=doc_pronto_io,
@@ -231,4 +293,4 @@ if df_original is not None:
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
 else:
-    st.info("Aguardando configuração ou carregamento correto da URL da planilha.")
+    st.info("Aguardando comunicação ou carregamento correto dos dados do Power Automate.")
