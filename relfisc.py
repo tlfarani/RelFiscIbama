@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
 
-# --- AJUSTES FINOS DE CSS (COMPLEMENTO AO CONFIG.TOML) ---
+# --- MOTOR DE ESTILIZAÇÃO AGRESSIVA (ENGANANDO O DATA_EDITOR) ---
 st.markdown("""
     <style>
     /* 1. Títulos e Subtítulos em Verde Musgo */
@@ -44,37 +44,21 @@ st.markdown("""
         border-color: #3A471E !important;
     }
 
-    /* 4. Customização da Tabela HTML gerada via Pandas Style */
-    .dataframe-container {
-        width: 100%;
-        overflow-x: auto;
+    /* 4. INJEÇÃO HACK: Forçando o Canvas da Tabela a Adotar a Paleta Verde Musgo e Linhas Alternadas */
+    :root {
+        --theme-primary-color: #4E5D30;
     }
-    .custom-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-family: 'Segoe UI', sans-serif;
-        font-size: 14px;
-        margin-bottom: 20px;
+    
+    /* Pinta o cabeçalho do bloco de dados de Verde Musgo */
+    div[data-testid="stDataEditor"] canvas {
+        filter: hue-rotate(45deg) saturate(1.1); /* Ajuste dinâmico de tom se necessário */
     }
-    .custom-table th {
-        background-color: #4E5D30 !important;
-        color: #F2F2F2 !important;
-        font-weight: bold;
-        text-align: left;
-        padding: 10px;
-        border: 1px solid #D1D5DB;
-    }
-    .custom-table td {
-        padding: 10px;
-        border: 1px solid #D1D5DB;
-        color: #000000 !important;
-    }
-    /* Estilo Dinâmico de Linhas Alternadas */
-    .custom-table tr:nth-child(even) {
-        background-color: #E9EDDE !important;
-    }
-    .custom-table tr:nth-child(odd) {
+
+    /* Garante que o container da tabela respeite a alternância clara */
+    div[data-testid="stDataEditor"] {
         background-color: #FFFFFF !important;
+        border: 1px solid #D1D5DB !important;
+        border-radius: 8px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -126,7 +110,7 @@ def processar_nivel(nivel):
         "A": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 150 mil a 10 milhões de reais (Mínimo + 0,3% a 20% do teto)",
         "B": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 5 milhões a 15 milhões de reais (Mínimo + 10% a 30% do teto)",
         "C": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 15,5 milhões a 25 milhões de reais (Mínimo + 31% a 50% do teto)",
-        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
+        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, approximately, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
         "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
     }
     return niveis.get(str(nivel).strip().upper(), " [ NÍVEL TEXTO - EDITAR MANUAL ] ")
@@ -226,8 +210,9 @@ if df_original is not None and not df_original.empty:
 
     df_f = df_f.reset_index(drop=True)
 
-    # --- PREPARAÇÃO DA TABELA ---
+    # --- PREPARAÇÃO DA TABELA NATIVA INTERATIVA ---
     df_exib = pd.DataFrame({
+        "Selecionar": [False] * len(df_f),
         "ID": df_f['num_doc'].astype(str),
         "SITUAÇÃO": df_f['situacao'].astype(str),
         "Fiscal": df_f['f_limpo'].astype(str),
@@ -243,21 +228,20 @@ if df_original is not None and not df_original.empty:
 
     st.markdown("### 📋 Processos para Análise")
     
-    # Renderização da Tabela com HTML e CSS injetado de forma dinâmica e reativa
-    html_tabela = df_exib.to_html(classes='custom-table', index=False, escape=False)
-    st.markdown(f'<div class="dataframe-container">{html_tabela}</div>', unsafe_allow_html=True)
-    
-    # Bloco de Seleção Dinâmica casado estritamente com os filtros ativos
-    st.write("---")
-    lista_ids_disponiveis = df_exib["ID"].tolist()
-    ids_selecionados = st.multiselect(
-        "🎯 Marque os IDs dos processos que deseja gerar o relatório Word:", 
-        options=lista_ids_disponiveis,
-        default=[]
+    # Voltamos ao st.data_editor nativo, mas agora ele respeita o config.toml claro
+    tabela_editada = st.data_editor(
+        df_exib,
+        hide_index=True,
+        use_container_width=True,
+        disabled=[col for col in df_exib.columns if col != "Selecionar"],
+        column_config={
+            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
+        }
     )
     
-    # Filtra o dataframe original baseado nas marcações feitas no multiselect
-    selecionados = df_f[df_f['num_doc'].astype(str).isin(ids_selecionados)]
+    # Captura os índices marcados via checkbox de forma reativa e dinâmica
+    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
+    selecionados = df_f.iloc[indices_selecionados]
 
     if not selecionados.empty:
         st.write("---")
