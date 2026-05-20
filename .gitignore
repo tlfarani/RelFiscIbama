@@ -1,0 +1,24 @@
+# --- Segredos e Configurações Locais ---
+.streamlit/
+secrets.toml
+
+# --- Arquivos Temporários do Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# --- Arquivos do Sistema e Editores ---
+.DS_Store
+.vscode/
+.idea/
+
+# --- Dados Locais (Opcional) ---
+# Se você baixar planilhas de teste na sua máquina, 
+# descomente a linha abaixo para não enviá-las ao GitHub:
+# *.xlsx
+# *.xlsm
