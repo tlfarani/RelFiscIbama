@@ -43,6 +43,39 @@ st.markdown("""
         background-color: #3A471E !important;
         border-color: #3A471E !important;
     }
+
+    /* 4. Customização da Tabela HTML gerada via Pandas Style */
+    .dataframe-container {
+        width: 100%;
+        overflow-x: auto;
+    }
+    .custom-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+    .custom-table th {
+        background-color: #4E5D30 !important;
+        color: #F2F2F2 !important;
+        font-weight: bold;
+        text-align: left;
+        padding: 10px;
+        border: 1px solid #D1D5DB;
+    }
+    .custom-table td {
+        padding: 10px;
+        border: 1px solid #D1D5DB;
+        color: #000000 !important;
+    }
+    /* Estilo Dinâmico de Linhas Alternadas */
+    .custom-table tr:nth-child(even) {
+        background-color: #E9EDDE !important;
+    }
+    .custom-table tr:nth-child(odd) {
+        background-color: #FFFFFF !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -195,7 +228,6 @@ if df_original is not None and not df_original.empty:
 
     # --- PREPARAÇÃO DA TABELA ---
     df_exib = pd.DataFrame({
-        "Selecionar": [False] * len(df_f),
         "ID": df_f['num_doc'].astype(str),
         "SITUAÇÃO": df_f['situacao'].astype(str),
         "Fiscal": df_f['f_limpo'].astype(str),
@@ -211,18 +243,21 @@ if df_original is not None and not df_original.empty:
 
     st.markdown("### 📋 Processos para Análise")
     
-    tabela_editada = st.data_editor(
-        df_exib,
-        hide_index=True,
-        use_container_width=True,
-        disabled=[col for col in df_exib.columns if col != "Selecionar"],
-        column_config={
-            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
-        }
+    # Renderização da Tabela com HTML e CSS injetado de forma dinâmica e reativa
+    html_tabela = df_exib.to_html(classes='custom-table', index=False, escape=False)
+    st.markdown(f'<div class="dataframe-container">{html_tabela}</div>', unsafe_allow_html=True)
+    
+    # Bloco de Seleção Dinâmica casado estritamente com os filtros ativos
+    st.write("---")
+    lista_ids_disponiveis = df_exib["ID"].tolist()
+    ids_selecionados = st.multiselect(
+        "🎯 Marque os IDs dos processos que deseja gerar o relatório Word:", 
+        options=lista_ids_disponiveis,
+        default=[]
     )
     
-    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
-    selecionados = df_f.iloc[indices_selecionados]
+    # Filtra o dataframe original baseado nas marcações feitas no multiselect
+    selecionados = df_f[df_f['num_doc'].astype(str).isin(ids_selecionados)]
 
     if not selecionados.empty:
         st.write("---")
@@ -265,7 +300,7 @@ if df_original is not None and not df_original.empty:
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
                     "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),  # <-- CORRIGIDO AQUI!
+                    "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
                     "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
                     "<<grandeza_texto>>": g_txt,
                     "<<grandeza_pontos>>": g_pt,
