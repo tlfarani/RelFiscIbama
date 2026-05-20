@@ -26,44 +26,40 @@ def converter_data_excel(valor):
     return val_str
 
 def extrair_volume_numerico(valor):
-    """ Utilizado estritamente para os testes lógicos de limiares dos modelos """
+    """ Utilizado para os testes de limiares dos modelos """
     if pd.isna(valor):
         return 0.0
     try:
-        val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
-        val_limpo = val_str.replace(",", ".")
-        return float(val_limpo)
+        return float(str(valor).strip().replace(",", "."))
     except ValueError:
         return 0.0
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING DEFINITIVA: Evita conversões científicas indesejadas do Python
-    e garante que o número decimal longo apareça exatamente como está na planilha.
+    VARIÁVEL STRING CORRIGIDA: Trata o float puramente numérico (mesmo científico tipo 1e-06),
+    forçando a abertura de até 7 casas decimais e aplicando a vírgula brasileira.
     """
     if pd.isna(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
         
-    val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
-    if not val_str or val_str in ["nan", "none"]:
-        return " [ VOLUME - EDITAR MANUAL ] "
-        
     try:
-        # Se o Pandas leu como float em notação científica (ex: 1e-06),
-        # esta linha força a conversão de volta para string decimal com até 7 casas
-        num_float = float(val_str.replace(",", "."))
-        if num_float < 1.0 and num_float > 0:
-            texto_formatado = f"{num_float:.7f}"
-            # Remove apenas os zeros inúteis após a sétima casa decimal, mantendo o padrão correto
+        num_float = float(str(valor).strip().replace(",", "."))
+        
+        if num_float == 0.0:
+            return "0"
+            
+        # Força formatação decimal estrita com até 7 casas decimais
+        texto_formatado = f"{num_float:.7f}"
+        
+        # Remove os zeros excedentes à direita que o Python adiciona para preencher as 7 casas
+        if "." in texto_formatado:
             texto_formatado = texto_formatado.rstrip('0')
             if texto_formatado.endswith('.'):
                 texto_formatado = texto_formatado[:-1]
-            return texto_formatado.replace(".", ",")
+                
+        return texto_formatado.replace(".", ",")
     except ValueError:
-        pass
-        
-    # Fallback: se já for uma string estruturada correta, retorna com a vírgula brasileira
-    return val_str.replace(".", ",")
+        return str(valor).strip().replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -102,6 +98,7 @@ def extrair_classe_e_modelo(row):
     class_ol = str(row.get('class_ol', '')).strip().title()
     class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
     
+    # Processa o volume puramente numérico
     vol_num = extrair_volume_numerico(row.get('vol_char', '0'))
 
     letra_risco = "A"
@@ -129,18 +126,18 @@ def extrair_classe_e_modelo(row):
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
-    # 1. Substituição e Realce em Parágrafos normais
+    # 1. Substituição e Realce Total em Parágrafos normais
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
                 p.text = p.text.replace(chave, str(valor))
         
-        # LÓGICA INICIAL RETOMADA: Se houver um alerta, realça o parágrafo inteiro
+        # Se contiver marcadores de erro, destaca todo o parágrafo de forma estável
         if "[" in p.text and "]" in p.text:
             for run in p.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 
-    # 2. Substituição e Realce em Tabelas estruturadas
+    # 2. Substituição e Realce Total em Tabelas estruturadas
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -188,6 +185,7 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
+    # Mapeamento estrito associando as colunas oficiais informadas
     colunas_map = {
         'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'Situação': 'situacao',
         'Laudo Válido (SEI)': 'laudo_sei', 'DATA ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
