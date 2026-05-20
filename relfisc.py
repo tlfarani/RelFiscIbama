@@ -98,29 +98,32 @@ def preencher_documento(caminho_modelo, dicionario_dados):
 
 st.title("⚖️ Força Tarefa - Geração de Autos e Relatórios")
 
-# --- CARREGAMENTO AUTOMÁTICO VIA URL DOS SEGREDOs ---
-@st.cache_data(ttl=300) # Atualiza os dados do SharePoint a cada 5 minutos
+# --- CARREGAMENTO AUTOMÁTICO VIA POWER AUTOMATE (SECRETS) ---
+@st.cache_data(ttl=300) # Atualiza a cada 5 minutos
 def carregar_dados_sharepoint():
     try:
-        # Puxa a URL criptografada/escondida nos segredos do Streamlit
+        # Puxa a URL do webhook do Power Automate escondida nos segredos
         url = st.secrets["sharepoint"]["url_planilha"]
         
-        # Se for um link direto de download ou compartilhado aberto
-        if "download=1" not in url and "sharepoint.com" in url:
-            # Pequeno ajuste comum para forçar o download direto de links do SharePoint
-            if "?" in url:
-                url = url.split("?")[0] + "?download=1"
-            else:
-                url = url + "?download=1"
-                
-        resposta = requests.get(url)
+        # 1. Definimos o cabeçalho informando que estamos lidando com JSON
+        headers = {"Content-Type": "application/json"}
+        
+        # 2. Alteramos para requests.post e enviamos um JSON vazio {} 
+        # para satisfazer o gatilho do Power Automate
+        resposta = requests.post(url, headers=headers, json={})
+        
+        # Dispara o erro caso o Power Automate retorne algo diferente de 200 (Sucesso)
         resposta.raise_for_status()
         
-        # Lê os dados da aba correta
+        # 3. Transforma a resposta binária recebida do fluxo em dataframe
         df = pd.read_excel(io.BytesIO(resposta.content), sheet_name="Processos_FT", header=0)
         return df
+    except requests.exceptions.HTTPError as e_http:
+        st.error(f"Erro HTTP na integração com o Power Automate: {e_http}")
+        st.info("💡 Verifique se o fluxo do Power Automate está ATIVADO e se o método configurado nele aceita requisições POST.")
+        return None
     except Exception as e:
-        st.error(f"Erro ao conectar ou ler a planilha do SharePoint: {e}")
+        st.error(f"Erro ao processar os dados recebidos: {e}")
         return None
 
 # Tentando carregar a base de dados em segundo plano
