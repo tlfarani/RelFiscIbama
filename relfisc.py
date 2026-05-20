@@ -135,101 +135,86 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # 1. Normalização inteligente de nomes de colunas
-    def normalizar_nome_coluna(col):
-        c = str(col).lower().strip()
-        c = c.replace("_x0020_", "").replace(" ", "").replace("_", "")
-        c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-        c = c.replace("ã", "a").replace("õ", "o").replace("ç", "c").replace("ê", "e")
-        return c
-
-    colunas_reais = {normalizar_nome_coluna(c): c for c in df.columns}
-    
-    # Mapeamento sem a coluna rígida de filtragem externa
-    mapeamento_alvo = {
-        'id': 'num_doc',
-        'processosei': 'processo_sei',
+    # Mapeamento Direto baseado EXATAMENTE nas chaves brutas que vieram do seu SharePoint
+    colunas_map = {
+        'ID': 'num_doc',
+        'processo_sei': 'processo_sei',
         'siema': 'siema',
         'situacao': 'situacao',
-        'laudosei': 'laudo_sei',
-        'dataacid': 'data_acid',
-        'relatsei': 'relat_sei',
+        'laudo_sei': 'laudo_sei',
+        'data_acid': 'data_acid',
+        'relat_sei': 'relat_sei',
         'instalacao': 'instalacao',
         'campo': 'campo',
         'bacia': 'bacia',
         'empresa': 'empresa',
         'cnpj': 'cnpj',
         'produto': 'produto',
-        'classol': 'class_ol',
-        'classrisco': 'class_risco',
-        'volchar': 'vol_char',
+        'class_ol': 'class_ol',
+        'class_risco': 'class_risco',
+        'vol_char': 'vol_char',
         'lat': 'lat',
         'lon': 'lon',
         'grandeza': 'grandeza',
-        'nivelpontos': 'nivel_pontos',
+        'nivel_pontos': 'nivel_pontos',
         'nivel': 'nivel',
         'auto': 'auto',
-        'multachar': 'multa_char',
-        'dataai': 'data_ai'
+        'multa_char': 'multa_char',
+        'data_ai': 'data_ai'
     }
     
-    for chave_normalizada, col_interna in mapeamento_alvo.items():
-        col_encontrada = None
-        for k_real in colunas_reais.keys():
-            if chave_normalizada in k_real or k_real in chave_normalizada:
-                col_encontrada = colunas_reais[k_real]
-                break
-                
-        if col_encontrada:
-            df[col_interna] = df[col_encontrada]
+    # Aplica o mapeamento de colunas de forma segura
+    for col_real, col_interna in colunas_map.items():
+        if col_real in df.columns:
+            df[col_interna] = df[col_real]
         else:
             df[col_interna] = ""
 
-    def limpar_id(val):
-        if isinstance(val, dict):
-            return str(val.get('Value', val.get('Id', list(val.values())[0])))
-        return str(val)
-    
-    df['num_doc'] = df['num_doc'].apply(limpar_id)
-
-    # --- FILTRAGEM BÁSICA DE INTEGRIDADE (Garante apenas que o processo tem SIEMA e Laudo válido) ---
+    # --- FILTRAGEM INTELIGENTE ---
+    # Limpa valores nulos e garante que campos numéricos ou strings vazias sejam tratados corretamente
+    df = df.dropna(subset=['siema'])
     df['siema'] = df['siema'].astype(str).str.strip()
-    df['laudo_sei'] = df['laudo_sei'].astype(str).str.strip()
     
-    df_filtrado = df[df['siema'] != 'nan']
-    df_filtrado = df_filtrado[
-        (df_filtrado['laudo_sei'] != '') & 
-        (df_filtrado['laudo_sei'] != '0') & 
-        (df_filtrado['laudo_sei'] != 'nan')
-    ].copy()
+    # Converte laudo para string limpando decimais flutuantes se houver (ex: 123.0 -> 123)
+    def normalizar_laudo(val):
+        if pd.isna(val) or val == "": return ""
+        val_str = str(val).split('.')[0].strip()
+        return "" if val_str in ["0", "nan", "None"] else val_str
+
+    df['laudo_sei'] = df['laudo_sei'].apply(normalizar_laudo)
+    
+    # Filtrando apenas linhas com SIEMA preenchido e Laudo existente
+    df_filtrado = df[(df['siema'] != "") & (df['siema'] != "nan") & (df['laudo_sei'] != "")].copy()
     
     st.subheader("Fila de Processos Disponíveis (SharePoint)")
     
     if df_filtrado.empty:
         st.success("Não há processos com laudos válidos na base de dados no momento!")
+        with st.expander("Ver diagnóstico técnico das linhas originais"):
+            st.write("Colunas detectadas:", list(df_original.columns))
+            st.write("Dados brutos recebidos:", df_original)
     else:
-        # 2. SISTEMA DE CHECKMARKS INTERNO DO APP
-        # Adiciona uma coluna booleana interna apenas na memória do app para a seleção
+        # Injeta a coluna de checkmarks na memória do app
         df_filtrado.insert(0, "Selecionar", False)
         
         colunas_resumo = ['Selecionar', 'num_doc', 'siema', 'processo_sei', 'empresa', 'bacia']
         df_exibicao = df_filtrado[colunas_resumo].loc[:, ~df_filtrado[colunas_resumo].columns.duplicated()]
         
-        # O st.data_editor renderiza os checkboxes interativos na tela de forma elegante
+        # Renderiza a tabela interativa com checkboxes
         tabela_editada = st.data_editor(
             df_exibicao,
             hide_index=True,
-            disabled=['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia'], # Bloqueia edição do resto
+            disabled=['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia'],
             column_config={
                 "Selecionar": st.column_config.CheckboxColumn(
                     "Selecionar",
                     help="Marque os processos que deseja gerar o relatório",
                     default=False,
-                )
+                ),
+                "num_doc": "ID"
             }
         )
         
-        # Captura os índices das linhas que o usuário marcou o checkmark
         indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
         df_selecionados = df_filtrado.iloc[indices_selecionados]
         
@@ -246,7 +231,7 @@ if df_original is not None and not df_original.empty:
                     modelo_arquivo = selecionar_modelo(row)
                     
                     if not modelo_arquivo:
-                        st.error(f"Não foi possível determinar o modelo para o SIEMA {row['siema']}. Verifique as classes de risco.")
+                        st.error(f"Não foi possível determinar o modelo para o SIEMA {row['siema']}. Verifique as classes de risco e tipo.")
                         continue
                         
                     caminho_modelo = os.path.join("modelos", modelo_arquivo)
@@ -293,14 +278,13 @@ if df_original is not None and not df_original.empty:
                     doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
                     nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', '')}.docx"
                     
-                    # Cria um box visual com o botão de download dedicado para este processo
                     with st.container(border=True):
                         st.write(f"📄 **Processo:** {row['processo_sei']} | **SIEMA:** {row['siema']} | **Empresa:** {row['empresa']}")
                         st.download_button(
                             label=f"📥 Baixar Documento Word ({row['siema']})",
                             data=doc_pronto_io,
                             file_name=nome_arquivo_saida,
-                            key=f"dl_{row['siema']}", # Chave única para o Streamlit mapear o botão
+                            key=f"dl_{row['siema']}",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
 else:
