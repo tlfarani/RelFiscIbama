@@ -1,6 +1,6 @@
 [theme]
 primaryColor = "#4E5D30"          # Verde Musgo para seleções e caixas ativas
 backgroundColor = "#F8F9F9"       # Cinza claro institucional para o fundo do app
-secondaryBackgroundColor = "#F8F9F9" # Verde Musgo (Garante o cabeçalho da tabela nesta cor!)
+secondaryBackgroundColor = "#FAFAFA" # Verde Musgo (Garante o cabeçalho da tabela nesta cor!)
 textColor = "#000000"             # Texto geral em preto para leitura limpa
 base = "light"
