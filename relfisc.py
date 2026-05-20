@@ -1,11 +1,30 @@
 import streamlit as st
 import pandas as pd
 from docx import Document
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 import io
 import os
 import requests
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
+
+# --- FUNÇÃO AUXILIAR PARA DESTACAR EM AMARELO NO WORD ---
+def destacar_texto_amarelo(p, texto_procurado, texto_substituto):
+    """
+    Substitui o texto em um parágrafo e aplica um destaque (shading) amarelo 
+    diretamente no XML do Word se o campo estiver marcado para revisão manual.
+    """
+    if texto_procurado in p.text:
+        # Armazena as propriedades originais de estilo do parágrafo, se necessário
+        p.text = p.text.replace(texto_procurado, texto_substituto)
+        
+        # Percorre os fragmentos de texto (runs) para aplicar o realce em amarelo onde o texto substituto foi inserido
+        for run in p.runs:
+            if texto_substituto in run.text:
+                # O XML 'w:shd' aplica uma cor de fundo (shading) amarela estável no Word
+                shading_xml = f'<w:shd {nsdecls("w")} w:fill="FFFF00"/>'
+                run._r.get_or_add_rPr().append(parse_xml(shading_xml))
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -17,7 +36,7 @@ def determinar_jurisdicao(bacia):
     return ""
 
 def processar_grandeza(grandeza):
-    g = str(grandeza).strip()
+    g = str(grandeza).strip().title()
     if g == "Potencial":
         return "quando as consequências não são evidentes", "5"
     elif g == "Reduzida":
@@ -28,7 +47,7 @@ def processar_grandeza(grandeza):
         return "quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"
     elif g == "Grave":
         return "quando os danos ambientais são de grande proporção ou de alta complexidade, gravidade ou magnitude, diante do contexto considerado", "70"
-    return "", ""
+    return "[GRANDEZA NÃO DEFINIDA]", "[PONTOS NÃO DEFINIDOS]"
 
 def processar_nivel(nivel):
     niveis = {
@@ -38,7 +57,7 @@ def processar_nivel(nivel):
         "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
         "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
     }
-    return niveis.get(str(nivel).strip().upper(), "")
+    return niveis.get(str(nivel).strip().upper(), "[NÍVEL TEXTO NÃO DEFINIDO]")
 
 def formatar_decimal(valor):
     try:
@@ -49,46 +68,56 @@ def formatar_decimal(valor):
         return str(valor)
 
 def selecionar_modelo(row):
-    class_ol = str(row.get('class_ol', '')).strip()
-    class_risco = str(row.get('class_risco', '')).strip()
+    class_ol = str(row.get('class_ol', '')).strip().title()
+    class_risco = str(row.get('class_risco', '')).strip().upper()
     
     try:
         vol_num = float(str(row.get('vol_char', '0')).replace(',', '.'))
     except (ValueError, TypeError):
         vol_num = 0.0
 
-    if class_ol == "Não Classificado" or class_risco == "OS (Não Classificado)" or class_ol == "": 
-        return None
-
-    if class_ol == "Oleoso" and class_risco == "A": return "Rel_Fisc_Oleoso_A.docx"
-    if class_ol == "Oleoso" and class_risco == "B": return "Rel_Fisc_Oleoso_B.docx"
-    if class_ol == "Oleoso" and class_risco == "D": return "Rel_Fisc_Oleoso_D.docx"
+    # Lógica de decisão ultra-resiliente baseada em substrings
+    if "Oleoso" in class_ol and "Não" not in class_ol:
+        if "A" in class_risco: return "Rel_Fisc_Oleoso_A.docx"
+        if "B" in class_risco: return "Rel_Fisc_Oleoso_B.docx"
+        if "D" in class_risco: return "Rel_Fisc_Oleoso_D.docx"
+        # Fallback caso tenha a substância mas falte o risco regulamentar exato
+        return "Rel_Fisc_Oleoso_A.docx" 
     
-    if class_ol == "Não Oleoso":
-        if class_risco == "A":
+    if "Não Oleoso" in class_ol or "Nao Oleoso" in class_ol:
+        if "A" in class_risco:
             return "Rel_Fisc_Nao_Oleoso_Art_61_A.docx" if vol_num > 8 else "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"
-        if class_risco == "B":
+        if "B" in class_risco:
             return "Rel_Fisc_Nao_Oleoso_Art_61_B.docx" if vol_num > 200 else "Rel_Fisc_Nao_Oleoso_Art_62_B.docx"
-        if class_risco == "D":
+        if "D" in class_risco:
             return "Rel_Fisc_Nao_Oleoso_Art_62_D.docx"
-    
+        return "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"
+
     return None
 
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
+    # Processa substituições e realces em parágrafos comuns
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
-                p.text = p.text.replace(chave, str(valor))
+                if "EDITAR MANUAl" in str(valor):
+                    destacar_texto_amarelo(p, chave, str(valor))
+                else:
+                    p.text = p.text.replace(chave, str(valor))
                 
+    # Processa substituições e realces dentro de tabelas estruturadas
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     for chave, valor in dicionario_dados.items():
                         if chave in p.text:
-                            p.text = p.text.replace(chave, str(valor))
+                            if "EDITAR MANUAl" in str(valor):
+                                destacar_texto_amarelo(p, chave, str(valor))
+                            else:
+                                p.text = p.text.replace(chave, str(valor))
     
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -99,16 +128,13 @@ def preencher_documento(caminho_modelo, dicionario_dados):
 
 st.title("⚖️ Força Tarefa - Geração de Autos e Relatórios")
 
-# --- CARREGAMENTO AUTOMÁTICO VIA POWER AUTOMATE (SECRETS) ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
-        
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
-        
         dados_json = resposta.json()
         
         if isinstance(dados_json, dict) and "value" in dados_json:
@@ -116,182 +142,141 @@ def carregar_dados_sharepoint():
         elif isinstance(dados_json, list):
             lista_registros = dados_json
         else:
-            st.error("O formato retornado pelo Power Automate não é uma lista válida de registros.")
+            st.error("O formato retornado pelo Power Automate não é válido.")
             return None
-            
-        df = pd.DataFrame(lista_registros)
-        return df
-        
-    except requests.exceptions.HTTPError as e_http:
-        st.error(f"Erro HTTP na integração com o Power Automate: {e_http}")
-        return None
+        return pd.DataFrame(lista_registros)
     except Exception as e:
-        st.error(f"Erro ao processar o JSON recebido: {e}")
+        st.error(f"Erro ao carregar dados: {e}")
         return None
 
-# Tentando carregar a base de dados
 df_original = carregar_dados_sharepoint()
 
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # MAPEAMENTO ATUALIZADO COM OS NOMES EXATOS DAS COLUNAS DA SUA PLANILHA
+    # Mapeamento estrito das colunas oficiais informadas
     colunas_map = {
-        'ID': 'num_doc',
-        'PROCESSO': 'processo_sei',
-        'SIEMA': 'siema',
-        'Situação': 'situacao',
-        'Laudo Válido (SEI)': 'laudo_sei',
-        'DATA ACIDENTE': 'data_acid',
-        'RAIPO_SEI': 'relat_sei',
-        'INSTALAÇÃO': 'instalacao',
-        'Campo': 'campo',
-        'Bacia': 'bacia',
-        'EMPRESA': 'empresa',
-        'CNPJ': 'cnpj',
-        'PRODUTO': 'produto',
-        'CLASS_OL': 'class_ol',
-        'CLASS. RISCO': 'class_risco',
-        'VOL.': 'vol_char',
-        'Lat_Auto': 'lat',
-        'Lon_Auto': 'lon',
-        'Grandeza': 'grandeza',
-        'Nivel_Pontos': 'nivel_pontos',
-        'Nivel': 'nivel',
-        'Auto Infração': 'auto',
-        'Multa Aplicada': 'multa_char',
-        'Data_AI': 'data_ai'
+        'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'Situação': 'situacao',
+        'Laudo Válido (SEI)': 'laudo_sei', 'DATA ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
+        'INSTALAÇÃO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
+        'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS. RISCO': 'class_risco',
+        'VOL.': 'vol_char', 'Lat_Auto': 'lat', 'Lon_Auto': 'lon', 'Grandeza': 'grandeza',
+        'Nivel_Pontos': 'nivel_pontos', 'Nivel': 'nivel', 'Auto Infração': 'auto',
+        'Multa Aplicada': 'multa_char', 'Data_AI': 'data_ai'
     }
     
-    # Aplica o mapeamento de colunas estruturado
     for col_real, col_interna in colunas_map.items():
         if col_real in df.columns:
             df[col_interna] = df[col_real]
         else:
             df[col_interna] = ""
 
-    # --- TRATAMENTO E FILTRAGEM INTELIGENTE ---
-    df = df.dropna(subset=['siema'])
-    df['siema'] = df['siema'].astype(str).str.strip()
-    
-    # Normaliza a string do laudo eliminando pontos flutuantes do Excel/SharePoint (.0)
-    def normalizar_laudo(val):
-        if pd.isna(val) or val == "": return ""
-        val_str = str(val).split('.')[0].strip()
-        return "" if val_str in ["0", "nan", "None"] else val_str
-
-    df['laudo_sei'] = df['laudo_sei'].apply(normalizar_laudo)
-    
-    # Mantém apenas registros válidos com SIEMA e Laudo Técnico preenchidos
-    df_filtrado = df[(df['siema'] != "") & (df['siema'] != "nan") & (df['laudo_sei'] != "")].copy()
+    # Sem filtros excludentes: exibe a totalidade das linhas recebidas
+    df_filtrado = df.reset_index(drop=True)
     
     st.subheader("Fila de Processos Disponíveis (SharePoint)")
     
-    if df_filtrado.empty:
-        st.success("Não há processos com laudos válidos na base de dados no momento!")
-        with st.expander("Ver diagnóstico de colunas"):
-            st.write("Colunas detectadas na planilha:", list(df_original.columns))
-            st.write("Dados brutos recebidos do Power Automate:", df_original.head(5))
+    # Monta a estrutura da tabela interativa
+    df_exibicao = pd.DataFrame({
+        "Selecionar": [False] * len(df_filtrado),
+        "ID": df_filtrado['num_doc'].astype(str),
+        "SIEMA": df_filtrado['siema'].astype(str),
+        "Processo SEI": df_filtrado['processo_sei'].astype(str),
+        "Empresa": df_filtrado['empresa'].astype(str),
+        "Bacia": df_filtrado['bacia'].astype(str)
+    })
+    
+    tabela_editada = st.data_editor(
+        df_exibicao,
+        hide_index=True,
+        disabled=["ID", "SIEMA", "Processo SEI", "Empresa", "Bacia"],
+        column_config={
+            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
+        }
+    )
+    
+    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
+    df_selecionados = df_filtrado.iloc[indices_selecionados]
+    
+    st.write("---")
+    st.subheader("Ações de Geração")
+    
+    if df_selecionados.empty:
+        st.info("💡 Marque os processos desejados na coluna **'Selecionar'** para liberar a geração.")
     else:
-        # Reseta o index de forma idêntica para manter o alinhamento visual e de memória do Pandas
-        df_filtrado = df_filtrado.reset_index(drop=True)
+        st.warning(f"Você selecionou **{len(df_selecionados)}** processo(s).")
         
-        # Constrói o DataFrame que será renderizado visualmente
-        df_exibicao = pd.DataFrame({
-            "Selecionar": [False] * len(df_filtrado),
-            "ID": df_filtrado['num_doc'].astype(str),
-            "SIEMA": df_filtrado['siema'],
-            "Processo SEI": df_filtrado['processo_sei'].astype(str),
-            "Empresa": df_filtrado['empresa'].astype(str),
-            "Bacia": df_filtrado['bacia'].astype(str)
-        })
-        
-        # Renderiza a tabela interativa com checkboxes embutidos
-        tabela_editada = st.data_editor(
-            df_exibicao,
-            hide_index=True,
-            disabled=["ID", "SIEMA", "Processo SEI", "Empresa", "Bacia"],
-            column_config={
-                "Selecionar": st.column_config.CheckboxColumn(
-                    "Selecionar",
-                    help="Marque os processos que deseja gerar o relatório",
-                    default=False,
-                )
-            }
-        )
-        
-        # Captura as seleções corretas baseadas nos índices estritamente correspondentes
-        indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
-        df_selecionados = df_filtrado.iloc[indices_selecionados]
-        
-        st.write("---")
-        st.subheader("Ações de Geração")
-        
-        if df_selecionados.empty:
-            st.info("💡 Marque uma ou mais caixas de seleção acima na coluna **'Selecionar'** para liberar a geração do documento.")
-        else:
-            st.warning(f"Você selecionou **{len(df_selecionados)}** processo(s) para processamento.")
-            
-            if st.button("🚀 Gerar Relatórios dos Processos Selecionados"):
-                for _, row in df_selecionados.iterrows():
-                    modelo_arquivo = selecionar_modelo(row)
+        if st.button("🚀 Gerar Relatórios dos Processos Selecionados"):
+            for _, row in df_selecionados.iterrows():
+                modelo_arquivo = selecionar_modelo(row)
+                
+                if not modelo_arquivo:
+                    st.error(f"❌ Não foi possível determinar o modelo para o ID {row['num_doc']}. Certifique-se de que a coluna 'CLASS_OL' indique se é Oleoso ou Não Oleoso no SharePoint.")
+                    continue
                     
-                    if not modelo_arquivo:
-                        st.error(f"Não foi possível determinar o modelo para o SIEMA {row['siema']}. Verifique se as classes de risco e o tipo (Oleoso/Não Oleoso) estão preenchidos no SharePoint.")
-                        continue
-                        
-                    caminho_modelo = os.path.join("modelos", modelo_arquivo)
-                    
-                    if not os.path.exists(caminho_modelo):
-                        st.error(f"O arquivo de modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'. Certifique-se de realizar o upload dele no GitHub.")
-                        continue
-                        
-                    grandeza_texto, grandeza_pontos = processar_grandeza(str(row.get('grandeza', '')))
-                    
-                    dados_replace = {
-                        "<<siema>>": str(row.get('siema', '')),
-                        "<<processo_sei>>": str(row.get('processo_sei', '')),
-                        "<<laudo_sei>>": str(row.get('laudo_sei', '')),
-                        "<<data_acid>>": str(row.get('data_acid', '')),
-                        "<<relat_sei>>": str(row.get('relat_sei', '')),
-                        "<<instalacao>>": str(row.get('instalacao', '')),
-                        "<<campo>>": str(row.get('campo', '')),
-                        "<<bacia>>": str(row.get('bacia', '')),
-                        "<<empresa>>": str(row.get('empresa', '')),
-                        "<<cnpj>>": str(row.get('cnpj', '')),
-                        "<<produto>>": str(row.get('produto', '')),
-                        "<<class_ol>>": str(row.get('class_ol', '')),
-                        "<<class_risco>>": str(row.get('class_risco', '')),
-                        "<<vol_char>>": formatar_decimal(row.get('vol_char', '0')),
-                        "<<auto>>": str(row.get('auto', '')),
-                        "<<multa_num>>": str(row.get('multa_char', '')),
-                        "<<multa_char>>": str(row.get('multa_char', '')),
-                        "<<data_ai>>": str(row.get('data_ai', '')),
-                        "<<jurisdicao>>": determinar_jurisdicao(str(row.get('bacia', ''))),
-                        "<<lat_auto>>": str(row.get('lat', '')),
-                        "<<lon_auto>>": str(row.get('lon', '')),
-                        "<<grandeza>>": str(row.get('grandeza', '')),
-                        "<<grandeza_texto>>": grandeza_texto,
-                        "<<grandeza_pontos>>": grandeza_pontos,
-                        "<<nivel>>": str(row.get('nivel', '')),
-                        "<<nivel_pontos>>": str(row.get('nivel_pontos', '')),
-                        "<<nivel_texto>>": processar_nivel(str(row.get('nivel', '')))
-                    }
-                    
-                    for k, v in dados_replace.items():
-                        if v in ["nan", "None"]: dados_replace[k] = ""
-                    
-                    doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
-                    nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', '')}.docx"
-                    
-                    with st.container(border=True):
-                        st.write(f"📄 **Processo:** {row['processo_sei']} | **SIEMA:** {row['siema']} | **Empresa:** {row['empresa']}")
-                        st.download_button(
-                            label=f"📥 Baixar Documento Word ({row['siema']})",
-                            data=doc_pronto_io,
-                            file_name=nome_arquivo_saida,
-                            key=f"dl_{row['siema']}",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
+                caminho_modelo = os.path.join("modelos", modelo_arquivo)
+                
+                if not os.path.exists(caminho_modelo):
+                    st.error(f"Arquivo '{modelo_arquivo}' ausente na pasta 'modelos/'.")
+                    continue
+                
+                # Tratamento de tags ausentes, vazias ou contendo erro "Processo Não Encontrado"
+                def tratar_tag(valor, nome_tag):
+                    v_str = str(valor).strip()
+                    if pd.isna(valor) or v_str in ["", "nan", "None", "0", "Processo Não Encontrado"]:
+                        return f" [{nome_tag.upper()} - EDITAR MANUAl] "
+                    return v_str
+
+                grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
+                if "NÃO DEFINIDA" in grandeza_texto:
+                    grandeza_texto = " [GRANDEZA TEXTO - EDITAR MANUAl] "
+                    grandeza_pontos = " [PONTOS GRANDEZA - EDITAR MANUAl] "
+
+                nivel_texto = processar_nivel(row.get('nivel', ''))
+                if "NÃO DEFINIDO" in nivel_texto:
+                    nivel_texto = " [NÍVEL TEXTO - EDITAR MANUAl] "
+
+                dados_replace = {
+                    "<<siema>>": tratar_tag(row.get('siema', ''), "siema"),
+                    "<<processo_sei>>": tratar_tag(row.get('processo_sei', ''), "processo_sei"),
+                    "<<laudo_sei>>": tratar_tag(row.get('laudo_sei', ''), "laudo_sei").split('.')[0],
+                    "<<data_acid>>": tratar_tag(row.get('data_acid', ''), "data_acidente"),
+                    "<<relat_sei>>": tratar_tag(row.get('relat_sei', ''), "raipo_sei"),
+                    "<<instalacao>>": tratar_tag(row.get('instalacao', ''), "instalacao"),
+                    "<<campo>>": tratar_tag(row.get('campo', ''), "campo"),
+                    "<<bacia>>": tratar_tag(row.get('bacia', ''), "bacia"),
+                    "<<empresa>>": tratar_tag(row.get('empresa', ''), "empresa"),
+                    "<<cnpj>>": tratar_tag(row.get('cnpj', ''), "cnpj"),
+                    "<<produto>>": tratar_tag(row.get('produto', ''), "produto"),
+                    "<<class_ol>>": tratar_tag(row.get('class_ol', ''), "class_ol"),
+                    "<<class_risco>>": tratar_tag(row.get('class_risco', ''), "class_risco"),
+                    "<<vol_char>>": formatar_decimal(row.get('vol_char', '0')),
+                    "<<auto>>": tratar_tag(row.get('auto', ''), "auto_infracao"),
+                    "<<multa_num>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
+                    "<<multa_char>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
+                    "<<data_ai>>": tratar_tag(row.get('data_ai', ''), "data_ai"),
+                    "<<jurisdicao>>": determinar_jurisdicao(str(row.get('bacia', ''))),
+                    "<<lat_auto>>": tratar_tag(row.get('lat', ''), "lat"),
+                    "<<lon_auto>>": tratar_tag(row.get('lon', ''), "lon"),
+                    "<<grandeza>>": tratar_tag(row.get('grandeza', ''), "grandeza"),
+                    "<<grandeza_texto>>": grandeza_texto,
+                    "<<grandeza_pontos>>": grandeza_pontos,
+                    "<<nivel>>": tratar_tag(row.get('nivel', ''), "nivel"),
+                    "<<nivel_pontos>>": tratar_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
+                    "<<nivel_texto>>": nivel_texto
+                }
+                
+                doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
+                nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', 'Revisao')}.docx"
+                
+                with st.container(border=True):
+                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+                    st.download_button(
+                        label=f"📥 Baixar Documento Word (ID {row['num_doc']})",
+                        data=doc_pronto_io,
+                        file_name=nome_arquivo_saida,
+                        key=f"dl_{row['num_doc']}",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
 else:
     st.info("Aguardando carregamento e resposta válida do Power Automate.")
