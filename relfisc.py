@@ -107,6 +107,15 @@ def extrair_volume_texto(valor):
         return texto_formatado.replace(".", ",")
     except ValueError: return val_str.replace(".", ",")
 
+# 🌟 FUNÇÃO GLOBAL ÚNICA E TRATADA CONTRA SIEMA FORA DO AR
+def t_tag(valor, nome_tag):
+    v_s = str(valor).strip()
+    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: 
+        return f" [ {nome_tag.upper()} - EDITAR MANUAL ] "
+    if nome_tag == "siema" and "fora do ar" in v_s.lower():
+        return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
+    return v_s
+
 # --- FUNÇÕES DE NEGÓCIO ---
 
 def determinar_jurisdicao(bacia):
@@ -156,7 +165,7 @@ def extrair_classe_e_modelo(row):
     return None, None
 
 def preencher_documento(caminho_modelo, dicionario_dados):
-    doc = Document(caminway_modelo if 'caminway_modelo' in locals() else caminho_modelo)
+    doc = Document(caminho_modelo)
     def tratar_p(p):
         for chave, valor in dicionario_dados.items():
             if chave in p.text: p.text = p.text.replace(chave, str(valor))
@@ -205,7 +214,7 @@ if df_original is not None and not df_original.empty:
         'VOL': 'vol_char', 'Lat': 'lat', 'Lon': 'lon', 'Grandeza': 'grandeza',
         'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
         'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos',
-        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto'  # Mapeamento interno preservado
+        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto'
     }
     
     for col_real, col_interna in colunas_map.items():
@@ -251,8 +260,8 @@ if df_original is not None and not df_original.empty:
         "Risco": df_f['class_risco'].astype(str),
         "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
         "Multa Prev": df_f['multa_prevista'].astype(str),
-        "Lat Auto": df_f['lat_auto'].astype(str),  # Ajustado cirurgicamente na exibição
-        "Lon Auto": df_f['lon_auto'].astype(str)   # Ajustado cirurgicamente na exibição
+        "Lat Auto": df_f['lat_auto'].astype(str),
+        "Lon Auto": df_f['lon_auto'].astype(str)
     })
 
     tabela_editada = st.data_editor(
@@ -273,6 +282,7 @@ if df_original is not None and not df_original.empty:
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
+        # --- LÓGICA DE COMPACTAÇÃO EM ZIP (EM MEMÓRIA) ---
         zip_buffer = io.BytesIO()
         arquivos_para_zipar = 0
         
@@ -283,11 +293,6 @@ if df_original is not None and not df_original.empty:
                 
                 caminho = os.path.join("modelos", modelo)
                 if not os.path.exists(caminho): continue
-
-                def t_tag(v, n):
-                    v_s = str(v).strip()
-                    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {n.upper()} - EDITAR MANUAL ] "
-                    return v_s
 
                 grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
                 nivel_texto = processar_nivel(row.get('nivel', ''))
@@ -348,11 +353,6 @@ if df_original is not None and not df_original.empty:
             
             caminho = os.path.join("modelos", modelo)
             if not os.path.exists(caminho): continue
-
-            def t_tag(v, n):
-                v_s = str(v).strip()
-                if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {n.upper()} - EDITAR MANUAL ] "
-                return v_s
 
             grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
             nivel_texto = processar_nivel(row.get('nivel', ''))
