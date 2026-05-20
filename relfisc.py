@@ -5,21 +5,28 @@ from docx.enum.text import WD_COLOR_INDEX
 import io
 import os
 import requests
-import re
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
 # --- FUNÇÕES AUXILIARES DE TRATAMENTO ---
 
-def destacar_texto_amarelo(p, texto_substituto):
+def substituir_e_realçar(p, chave, valor):
     """
-    Aplica o realce de marca-texto (Highlight) do Word estritamente sobre os caracteres 
-    do texto substituto, evitando pintar o fundo do parágrafo inteiro.
+    Substitui a tag do Word mantendo a integridade do texto. 
+    Se o valor contiver colchetes '[ ]', aplica o marca-texto amarelo estritamente nele.
     """
-    for run in p.runs:
-        if texto_substituto in run.text:
+    if chave in p.text:
+        # Se o valor for um alerta de erro/revisão manual
+        if isinstance(valor, str) and "[" in valor and "]" in valor:
+            # Limpa o texto original da tag para reconstruir com o realce
+            p.text = p.text.replace(chave, "")
+            # Adiciona o texto de alerta com a propriedade de marca-texto ativa
+            run = p.add_run(valor)
             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        else:
+            # Substituição limpa padrão para dados corretos
+            p.text = p.text.replace(chave, str(valor))
 
 def converter_data_excel(valor):
     val_str = str(valor).strip()
@@ -36,44 +43,44 @@ def converter_data_excel(valor):
     return val_str
 
 def extrair_volume_numerico(valor):
-    """
-    EQUIVALENTE À VARIÁVEL NUMÉRICA DO VBA:
-    Extrai estritamente o número puro (float) para rodar os testes de limiares de modelo,
-    suportando precisão de até 7 casas decimais.
-    """
     if pd.isna(valor):
         return 0.0
-    val_str = str(valor).strip().lower()
-    # Remove m3, m³ e espaços
-    val_limpo = val_str.replace("m3", "").replace("m³", "").strip()
-    # Substitui vírgula por ponto para o Python entender como float
-    val_limpo = val_limpo.replace(",", ".")
-    
-    # Filtra mantendo apenas números, pontos ou sinal de menos (caso use notação científica)
-    val_limpo = "".join(c for c in val_limpo if c.isdigit() or c in [".", "-", "e"])
-    
     try:
+        val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
+        val_limpo = val_str.replace(",", ".")
         return float(val_limpo)
     except ValueError:
         return 0.0
 
 def extrair_volume_texto(valor):
     """
-    EQUIVALENTE À VARIÁVEL STRING DO VBA:
-    Preserva o formato de texto original para preenchimento da tag no Word.
+    Converte floats científicos e notações truncadas do Pandas (ex: 1e-06)
+    de volta para uma string decimal brasileira legível com até 7 casas decimais.
     """
     if pd.isna(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
         
-    val_str = str(valor).strip().lower()
+    val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
     if not val_str or val_str in ["nan", "none"]:
         return " [ VOLUME - EDITAR MANUAL ] "
         
-    # Limpa apenas a unidade de medida se ela estiver colada
-    val_limpo = val_str.replace("m3", "").replace("m³", "").strip()
-    # Garante o padrão brasileiro de vírgula para a exibição no relatório
-    val_limpo = val_limpo.replace(".", ",")
-    return val_limpo
+    try:
+        # Tenta converter para float para resolver o problema de notações científicas do Excel (1e-06)
+        num_float = float(val_str.replace(",", "."))
+        
+        if num_float == 0.0:
+            return "0"
+            
+        # Se for um número decimal pequeno, força a exibição formatada de até 7 casas decimais
+        if num_float < 1.0:
+            texto_formatado = f"{num_float:.7f}".rstrip('0')
+            if texto_formatado.endswith('.'):
+                texto_formatado = texto_formatado[:-1]
+            return texto_formatado.replace(".", ",")
+            
+        return str(valor).strip().replace(".", ",")
+    except ValueError:
+        return val_str.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
@@ -112,7 +119,6 @@ def extrair_classe_e_modelo(row):
     class_ol = str(row.get('class_ol', '')).strip().title()
     class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
     
-    # Executa o cálculo usando a variável numérica isolada
     vol_num = extrair_volume_numerico(row.get('vol_char', '0'))
 
     letra_risco = "A"
@@ -140,29 +146,18 @@ def extrair_classe_e_modelo(row):
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
-    # 1. Faz as substituições em parágrafos comuns
+    # 1. Substituições e realces em parágrafos comuns
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
-            if chave in p.text:
-                p.text = p.text.replace(chave, str(valor))
-        # Aplica o realce de marca-texto restrito às palavras modificadas
-        if "EDITAR MANUAL" in p.text:
-            for chave, valor in dicionario_dados.items():
-                if "EDITAR MANUAL" in str(valor):
-                    destacar_texto_amarelo(p, str(valor))
+            substituir_e_realçar(p, chave, valor)
                 
-    # 2. Faz as substituições dentro de tabelas estruturadas
+    # 2. Substituições e realces dentro de tabelas estruturadas
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     for chave, valor in dicionario_dados.items():
-                        if chave in p.text:
-                            p.text = p.text.replace(chave, str(valor))
-                    if "EDITAR MANUAL" in p.text:
-                        for chave, valor in dicionario_dados.items():
-                            if "EDITAR MANUAL" in str(valor):
-                                destacar_texto_amarelo(p, str(valor))
+                        substituir_e_realçar(p, chave, valor)
     
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -289,7 +284,7 @@ if df_original is not None and not df_original.empty:
                     "<<produto>>": tratar_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": tratar_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco_final,
-                    "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')), # Injeta a variável String no Word
+                    "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
                     "<<auto>>": tratar_tag(row.get('auto', ''), "auto_infracao"),
                     "<<multa_num>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
                     "<<multa_char>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
