@@ -5,28 +5,49 @@ from docx.enum.text import WD_COLOR_INDEX
 import io
 import os
 import requests
+from decimal import Decimal
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
 # --- FUNÇÕES AUXILIARES DE TRATAMENTO ---
 
-def substituir_e_realçar(p, chave, valor):
+def preencher_e_realcar_texto(doc, dicionario_dados):
     """
-    Substitui a tag do Word mantendo a integridade do texto. 
-    Se o valor contiver colchetes '[ ]', aplica o marca-texto amarelo estritamente nele.
+    Substitui as tags no documento preservando estritamente a formatação original 
+    e aplica o realce de marca-texto amarelo apenas sobre o texto inserido 
+    se ele for um aviso de edição manual (contiver '[' e ']').
     """
-    if chave in p.text:
-        # Se o valor for um alerta de erro/revisão manual
-        if isinstance(valor, str) and "[" in valor and "]" in valor:
-            # Limpa o texto original da tag para reconstruir com o realce
-            p.text = p.text.replace(chave, "")
-            # Adiciona o texto de alerta com a propriedade de marca-texto ativa
-            run = p.add_run(valor)
-            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-        else:
-            # Substituição limpa padrão para dados corretos
-            p.text = p.text.replace(chave, str(valor))
+    def processar_paragrafo(p):
+        # Primeiro, trata substituições simples onde a tag está inteira em uma run
+        for run in p.runs:
+            for chave, valor in dicionario_dados.items():
+                if chave in run.text:
+                    run.text = run.text.replace(chave, str(valor))
+                    if isinstance(valor, str) and "[" in valor and "]" in valor:
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        
+        # Caso a tag tenha sido fragmentada pelo Word entre múltiplas runs, trata no texto completo
+        for chave, valor in dicionario_dados.items():
+            if chave in p.text:
+                # Faz a substituição no texto total do parágrafo
+                p.text = p.text.replace(chave, str(valor))
+                # Se for um caso de edição manual, garante o realce nas runs que contêm o aviso
+                if isinstance(valor, str) and "[" in valor and "]" in valor:
+                    for r in p.runs:
+                        if valor in r.text or "EDITAR MANUAL" in r.text:
+                            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+    # Aplica em parágrafos normais
+    for p in doc.paragraphs:
+        processar_paragrafo(p)
+                
+    # Aplica em todas as tabelas do documento
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    processar_paragrafo(p)
 
 def converter_data_excel(valor):
     val_str = str(valor).strip()
@@ -54,8 +75,8 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    Converte floats científicos e notações truncadas do Pandas (ex: 1e-06)
-    de volta para uma string decimal brasileira legível com até 7 casas decimais.
+    Utiliza a biblioteca Decimal para capturar a string real vinda do banco,
+    evitando que números decimais longos (ex: 0.0000010) percam precisão ou virem zero.
     """
     if pd.isna(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
@@ -65,21 +86,22 @@ def extrair_volume_texto(valor):
         return " [ VOLUME - EDITAR MANUAL ] "
         
     try:
-        # Tenta converter para float para resolver o problema de notações científicas do Excel (1e-06)
-        num_float = float(val_str.replace(",", "."))
+        # Trata notações científicas e decimais longas forçando conversão exata via Decimal
+        num_limpo = val_str.replace(",", ".")
+        d = Decimal(num_limpo)
         
-        if num_float == 0.0:
+        if d == 0:
             return "0"
             
-        # Se for um número decimal pequeno, força a exibição formatada de até 7 casas decimais
-        if num_float < 1.0:
-            texto_formatado = f"{num_float:.7f}".rstrip('0')
-            if texto_formatado.endswith('.'):
-                texto_formatado = texto_formatado[:-1]
-            return texto_formatado.replace(".", ",")
+        # Converte para string preservando todas as casas decimais originais
+        texto_decimal = format(d, 'f')
+        
+        # Caso o Python adicione zeros demais após a precisão do float, limitamos em 7 casas
+        if "." in texto_decimal and len(texto_decimal.split(".")[1]) > 7:
+            texto_decimal = f"{float(num_limpo):.7f}"
             
-        return str(valor).strip().replace(".", ",")
-    except ValueError:
+        return texto_decimal.replace(".", ",")
+    except Exception:
         return val_str.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
@@ -98,7 +120,7 @@ def processar_grandeza(grandeza):
     elif g == "Reduzida":
         return "quando os danos ambientais são locais ou temporários", "15"
     elif g == "Fraca":
-        return "quando os danos ambientais são de pequena proporção ou de baixa complexidade, gravidade ou magnitude, diante do contexto considerado", "30"
+        return "quando os danos ambientais são de pequena proporção ou de baixa complexity, gravidade ou magnitude, diante do contexto considerado", "30"
     elif g == "Moderada":
         return "quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"
     elif g == "Grave":
@@ -146,18 +168,8 @@ def extrair_classe_e_modelo(row):
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
     
-    # 1. Substituições e realces em parágrafos comuns
-    for p in doc.paragraphs:
-        for chave, valor in dicionario_dados.items():
-            substituir_e_realçar(p, chave, valor)
-                
-    # 2. Substituições e realces dentro de tabelas estruturadas
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    for chave, valor in dicionario_dados.items():
-                        substituir_e_realçar(p, chave, valor)
+    # Processa as substituições e realces de forma segura
+    preencher_e_realcar_texto(doc, dicionario_dados)
     
     buffer = io.BytesIO()
     doc.save(buffer)
