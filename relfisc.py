@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
 
-# --- CUSTOMIZAÇÃO COMPLETA DE INTERFACE (BLINDAGEM VISUAL) ---
+# --- AJUSTES FINOS DE CSS EM ADENDO AO TEMA ---
 st.markdown("""
     <style>
     /* 1. Títulos e Subtítulos em Verde Musgo */
@@ -42,37 +42,6 @@ st.markdown("""
     div.stButton > button:first-child:hover {
         background-color: #3A471E !important;
         border-color: #3A471E !important;
-    }
-
-    /* 4. BLINDAGEM DOS FILTROS (Força fundo claro e remove o bloco escuro) */
-    div[data-baseweb="select"] > div {
-        background-color: #FFFFFF !important;
-        color: #000000 !important;
-        border: 1px solid #CBD5E1 !important;
-    }
-    div[data-baseweb="select"] input {
-        color: #000000 !important;
-    }
-    div[data-baseweb="select"] svg {
-        fill: #4E5D30 !important;
-    }
-
-    /* 5. INJEÇÃO CIRÚRGICA DE CORES ALTERNADAS FIXAS NA TABELA STREAMLIT */
-    /* Garante cabeçalho verde musgo sólido com texto claro */
-    div[data-testid="stDataEditor"] th {
-        background-color: #4E5D30 !important;
-        color: #F2F2F2 !important;
-        font-weight: bold !important;
-    }
-    
-    /* Aplica a alternância visual estrita de linhas na tela (Independente de Filtro ou Ordenação) */
-    div[data-testid="stDataEditor"] tr:nth-child(even) td {
-        background-color: #E9EDDE !important;
-        color: #000000 !important;
-    }
-    div[data-testid="stDataEditor"] tr:nth-child(odd) td {
-        background-color: #FFFFFF !important;
-        color: #000000 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -241,10 +210,18 @@ if df_original is not None and not df_original.empty:
     })
 
     st.markdown("### 📋 Processos para Análise")
+    
+    # 🌟 FUNÇÃO DE ESTILIZAÇÃO ZEBRADA INSPIRADA NO SEU APP AUXILIAR:
+    # Alterna dinamicamente entre Verde Claro (#E9EDDE) e Branco (#FFFFFF) com texto Preto
+    def estilar_linhas_zebradas_ibama(linha):
+        cor_fundo = "#E9EDDE" if linha.name % 2 == 0 else "#FFFFFF"
+        return [f'background-color: {cor_fundo}; color: #000000;' for _ in linha]
+        
+    df_estilizado = df_exib.style.apply(estilar_linhas_zebradas_ibama, axis=1)
 
-    # Invocação direta do st.data_editor nativo com a ordenação ativa
+    # st.data_editor nativo recebendo o dataframe estilizado de forma reativa e mantendo a ordenação!
     tabela_editada = st.data_editor(
-        df_exib,
+        df_estilizado,
         hide_index=True,
         use_container_width=True,
         disabled=[col for col in df_exib.columns if col != "Selecionar"],
@@ -256,7 +233,7 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     selecionados = df_f.iloc[indices_selecionados]
 
-    if not selecionados.empty:  # <-- CORREÇÃO EXATA DA SINTAXE AQUI!
+    if not selecionados.empty:
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
