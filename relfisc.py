@@ -7,156 +7,142 @@ import os
 import requests
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
 
-# --- FUNÇÕES AUXILIARES DE TRATAMENTO ---
+# --- PALETA DE CORES (CSS) ---
+# Verde Musgo: #4E5D30 | Cinza Claro: #F2F2F2 | Branco: #FFFFFF | Verde Bem Claro: #E9EDDE
+st.markdown("""
+    <style>
+    /* Estilo Geral do App */
+    .stApp {
+        background-color: #F8F9F9;
+    }
+    
+    /* Títulos e Subtítulos */
+    h1, h2, h3 {
+        color: #4E5D30 !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    /* Botão de Geração */
+    div.stButton > button:first-child {
+        background-color: #4E5D30;
+        color: #F2F2F2;
+        border-radius: 10px;
+        border: none;
+        padding: 10px 24px;
+        font-weight: bold;
+        transition: 0.3s;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #3A471E;
+        color: white;
+    }
+
+    /* Estilização das caixas de filtros */
+    .stMultiselect, .stCheckbox, .stSelectbox {
+        background-color: #FFFFFF;
+        border-radius: 5px;
+    }
+
+    /* Customização do Data Editor (via CSS para containers) */
+    [data-testid="stTable"] {
+        background-color: white;
+    }
+    </style>
+""", unsafe_allow_stdio=True)
+
+# --- FUNÇÕES DE TRATAMENTO ---
 
 def converter_data_excel(valor):
     val_str = str(valor).strip()
     if not val_str or val_str in ["nan", "None", "0"]:
         return " [ DATA - EDITAR MANUAL ] "
-        
     if val_str.isdigit():
         try:
             dias = int(val_str)
             data_real = datetime(1900, 1, 1) + timedelta(days=dias - 2)
             return data_real.strftime("%d/%m/%Y")
-        except:
-            pass
+        except: pass
     return val_str
 
 def extrair_volume_numerico(valor):
-    """ Utilizado estritamente para os testes lógicos de limiares dos modelos """
-    if pd.isna(valor):
-        return 0.0
-    try:
-        return float(str(valor).strip().replace(",", "."))
-    except ValueError:
-        return 0.0
+    if pd.isna(valor): return 0.0
+    try: return float(str(valor).strip().replace(",", "."))
+    except ValueError: return 0.0
 
 def extrair_volume_texto(valor):
-    """
-    VARIÁVEL STRING: Garante que o volume venha com a formatação exata, 
-    abrindo notações científicas e mantendo até 7 casas decimais.
-    """
-    if pd.isna(valor) or str(valor).strip() == "":
-        return " [ VOLUME - EDITAR MANUAL ] "
-        
+    if pd.isna(valor) or str(valor).strip() == "": return " [ VOLUME - EDITAR MANUAL ] "
     val_str = str(valor).strip().lower()
-    if val_str in ["nan", "none"]:
-        return " [ VOLUME - EDITAR MANUAL ] "
-        
     try:
         num_float = float(val_str.replace(",", "."))
-        if num_float == 0.0:
-            return "0"
-            
+        if num_float == 0.0: return "0"
         texto_formatado = f"{num_float:.7f}"
-        
         if "." in texto_formatado:
-            texto_formatado = texto_formatado.rstrip('0')
-            if texto_formatado.endswith('.'):
-                texto_formatado = texto_formatado[:-1]
-                
+            texto_formatado = texto_formatado.rstrip('0').rstrip('.')
         return texto_formatado.replace(".", ",")
-    except ValueError:
-        return val_str.replace(".", ",")
-
-# --- FUNÇÕES DE NEGÓCIO ---
-
-def determinar_jurisdicao(bacia):
-    bacia_limpa = str(bacia).lower().strip()
-    if "santos" in bacia_limpa: return "-SP"
-    if "campos" in bacia_limpa: return "-RJ"
-    if "espirito santo" in bacia_limpa: return "-ES"
-    return ""
+    except ValueError: return val_str.replace(".", ",")
 
 def processar_grandeza(grandeza):
     g = str(grandeza).strip().title()
-    if g == "Potencial":
-        return "quando as consequências não são evidentes", "5"
-    elif g == "Reduzida":
-        return "quando os danos ambientais são locais ou temporários", "15"
-    elif g == "Fraca":
-        return "quando os danos ambientais são de pequena proporção ou de baixa complexidade, gravidade ou magnitude, diante do contexto considerado", "30"
-    elif g == "Moderada":
-        return "quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"
-    elif g == "Grave":
-        return "quando os danos ambientais são de grande proporção ou de alta complexidade, gravidade ou magnitude, diante do contexto considerado", "70"
-    return " [ GRANDEZA TEXTO - EDITAR MANUAL ] ", " [ PONTOS GRANDEZA - EDITAR MANUAL ] "
+    tabela = {
+        "Potencial": ("quando as consequências não são evidentes", "5"),
+        "Reduzida": ("quando os danos ambientais são locais ou temporários", "15"),
+        "Fraca": ("quando os danos ambientais são de pequena proporção...", "30"),
+        "Moderada": ("quando os danos ambientais são de proporção intermediária...", "50"),
+        "Grave": ("quando os danos ambientais são de grande proporção...", "70")
+    }
+    return tabela.get(g, (" [ GRANDEZA TEXTO - EDITAR MANUAL ] ", " [ PONTOS GRANDEZA - EDITAR MANUAL ] "))
 
 def processar_nivel(nivel):
     niveis = {
-        "A": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 150 mil a 10 milhões de reais (Mínimo + 0,3% a 20% do teto)",
-        "B": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 5 milhões a 15 milhões de reais (Mínimo + 10% a 30% do teto)",
-        "C": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 15,5 milhões a 25 milhões de reais (Mínimo + 31% a 50% do teto)",
-        "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
-        "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
+        "A": "Multa de aprox. 150 mil a 10 milhões (Grande porte)",
+        "B": "Multa de aprox. 5 milhões a 15 milhões (Grande porte)",
+        "C": "Multa de aprox. 15,5 milhões a 25 milhões (Grande porte)",
+        "D": "Multa de aprox. 25,5 milhões a 37,5 milhões (Grande porte)",
+        "E": "Multa de aprox. 38 milhões a 50 milhões (Grande porte)"
     }
     return niveis.get(str(nivel).strip().upper(), " [ NÍVEL TEXTO - EDITAR MANUAL ] ")
 
 def extrair_classe_e_modelo(row):
     class_ol = str(row.get('class_ol', '')).strip().title()
     class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
-    
     vol_num = extrair_volume_numerico(row.get('vol_char', '0'))
-
     letra_risco = "A"
-    if "B" in class_risco_bruto: letra_risco = "B"
-    elif "C" in class_risco_bruto: letra_risco = "C"
-    elif "D" in class_risco_bruto: letra_risco = "D"
-    elif "E" in class_risco_bruto: letra_risco = "E"
+    for r in ["B", "C", "D", "E"]:
+        if r in class_risco_bruto: letra_risco = r; break
 
     if "Oleoso" in class_ol and "Não" not in class_ol:
-        if letra_risco in ["A", "B", "D"]:
-            return f"Rel_Fisc_Oleoso_{letra_risco}.docx", letra_risco
-        return "Rel_Fisc_Oleoso_A.docx", "A" 
+        return f"Rel_Fisc_Oleoso_{letra_risco}.docx" if letra_risco in ["A", "B", "D"] else "Rel_Fisc_Oleoso_A.docx", letra_risco
     
     if "Não Oleoso" in class_ol or "Nao Oleoso" in class_ol:
-        if letra_risco == "A":
-            return ("Rel_Fisc_Nao_Oleoso_Art_61_A.docx" if vol_num > 8 else "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"), "A"
-        if letra_risco == "B":
-            return ("Rel_Fisc_Nao_Oleoso_Art_61_B.docx" if vol_num > 200 else "Rel_Fisc_Nao_Oleoso_Art_62_B.docx"), "B"
-        if letra_risco == "D":
-            return "Rel_Fisc_Nao_Oleoso_Art_62_D.docx", "D"
+        if letra_risco == "A": return ("Rel_Fisc_Nao_Oleoso_Art_61_A.docx" if vol_num > 8 else "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"), "A"
+        if letra_risco == "B": return ("Rel_Fisc_Nao_Oleoso_Art_61_B.docx" if vol_num > 200 else "Rel_Fisc_Nao_Oleoso_Art_62_B.docx"), "B"
+        if letra_risco == "D": return "Rel_Fisc_Nao_Oleoso_Art_62_D.docx", "D"
         return "Rel_Fisc_Nao_Oleoso_Art_62_A.docx", "A"
-
     return None, None
 
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
-    
-    # 1. Substituição direta no p.text + realce total do parágrafo se houver alertas
-    for p in doc.paragraphs:
+    def tratar_p(p):
         for chave, valor in dicionario_dados.items():
-            if chave in p.text:
-                p.text = p.text.replace(chave, str(valor))
-        
+            if chave in p.text: p.text = p.text.replace(chave, str(valor))
         if "[" in p.text and "]" in p.text:
-            for run in p.runs:
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                
-    # 2. Substituição e Realce Total dentro de tabelas estruturadas
+            for run in p.runs: run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            
+    for p in doc.paragraphs: tratar_p(p)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                for p in cell.paragraphs:
-                    for chave, valor in dicionario_dados.items():
-                        if chave in p.text:
-                            p.text = p.text.replace(chave, str(valor))
-                    
-                    if "[" in p.text and "]" in p.text:
-                        for run in p.runs:
-                            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-    
+                for p in cell.paragraphs: tratar_p(p)
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
 
-# --- INTERFACE STREAMLIT ---
-
-st.title("⚖️ Força Tarefa - Geração de Autos e Relatórios")
+# --- INTERFACE ---
+st.title("⚖️ Fila de Fiscalização - IBAMA")
 
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
@@ -165,16 +151,11 @@ def carregar_dados_sharepoint():
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
-        dados_json = response = resposta.json()
-        
-        if isinstance(dados_json, dict) and "value" in dados_json:
-            lista_registros = dados_json["value"]
-        elif isinstance(dados_json, list):
-            lista_registros = dados_json
-        else:
-            st.error("O formato retornado pelo Power Automate não é válido.")
-            return None
-        return pd.DataFrame(lista_registros)
+        dados_json = resposta.json()
+        if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
+        elif isinstance(dados_json, list): lista = dados_json
+        else: return None
+        return pd.DataFrame(lista)
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
         return None
@@ -184,215 +165,129 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # MAPEAMENTO OFICIAL E RÍGIDO BASEADO NAS 40 COLUNAS REAIS DA PLANILHA
     colunas_map = {
-        'ID': 'num_doc',
-        'PROCESSO': 'processo_sei',
-        'SIEMA': 'siema',
-        'SITUACAO': 'situacao',
-        'LAUDO_SEI': 'laudo_sei',
-        'DATA_ACIDENTE': 'data_acid',
-        'RAIPO_SEI': 'relat_sei',
-        'INSTALACAO': 'instalacao',
-        'Campo': 'campo',
-        'Bacia': 'bacia',
-        'EMPRESA': 'empresa',
-        'CNPJ': 'cnpj',
-        'PRODUTO': 'produto',
-        'CLASS_OL': 'class_ol',
-        'CLASS_RISCO': 'class_risco',
-        'VOL': 'vol_char',
-        'Lat_Auto': 'lat',   # Caso queira exibir a coordenada informada
-        'Lon_Auto': 'lon',   # Caso queira exibir a coordenada informada
-        'Grandeza': 'grandeza',
-        'Nivel_Pontos': 'nivel_pontos',
-        'Nivel': 'nivel',
-        'AUTO_INFRACAO': 'auto',
-        'MULTA_APLICADA': 'multa_char',
-        'Data_AI': 'data_ai',
-        'MULTA_PREVISTA': 'multa_prevista',
-        'Fiscal': 'fiscal'
+        'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'SITUACAO': 'situacao',
+        'LAUDO_SEI': 'laudo_sei', 'DATA_ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
+        'INSTALACAO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
+        'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS_RISCO': 'class_risco',
+        'VOL': 'vol_char', 'Lat_Auto': 'lat', 'Lon_Auto': 'lon', 'Grandeza': 'grandeza',
+        'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
+        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal'
     }
     
     for col_real, col_interna in colunas_map.items():
-        if col_real in df.columns:
-            df[col_interna] = df[col_real]
-        else:
-            df[col_interna] = ""
+        if col_real in df.columns: df[col_interna] = df[col_real]
+        else: df[col_interna] = ""
 
-    # --- SEÇÃO DE FILTROS NA INTERFACE ---
-    st.subheader("🛠️ Filtros de Seleção")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Filtro de Situação (Padrão pré-selecionado: "Autuar")
-        opcoes_situacao = sorted(list(df['situacao'].astype(str).unique()))
-        default_situacao = ["Autuar"] if "Autuar" in opcoes_situacao else []
-        filtro_situacao = st.multiselect("Filtrar por SITUAÇÃO:", opcoes_situacao, default=default_situacao)
-        
-    with col2:
-        # Filtro Dinâmico de Fiscal (Trata campos em branco como 'Não Atribuído')
-        df['fiscal_limpo'] = df['fiscal'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
-        opcoes_fiscal = sorted(list(df['fiscal_limpo'].unique()))
-        filtro_fiscal = st.multiselect("Filtrar por FISCAL:", ["Todos"] + opcoes_fiscal, default=["Todos"])
-        
-    with col3:
-        # Filtro de Laudo SEI (Por padrão, esconde os vazios)
-        mostrar_todos_laudos = st.checkbox("Mostrar todos (incluindo sem LAUDO_SEI)", value=False)
+    # --- FILTROS ---
+    with st.container(border=True):
+        st.markdown("**🔍 Painel de Filtros**")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            op_situ = sorted(df['situacao'].astype(str).unique())
+            sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
+        with c2:
+            df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído"})
+            op_fisc = sorted(df['f_limpo'].unique())
+            sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
+        with c3:
+            todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
 
-    # --- APLICAÇÃO DOS FILTROS NO DATA-FRAME ---
-    df_filtrado = df.copy()
-    
-    if filtro_situacao:
-        df_filtrado = df_filtrado[df_filtrado['situacao'].astype(str).isin(filtro_situacao)]
-        
-    if filtro_fiscal and "Todos" not in filtro_fiscal:
-        df_filtrado = df_filtrado[df_filtrado['fiscal_limpo'].astype(str).isin(filtro_fiscal)]
-        
-    if not mostrar_todos_laudos:
-        df_filtrado = df_filtrado[df_filtrado['laudo_sei'].astype(str).str.strip() != ""]
-        df_filtrado = df_filtrado[df_filtrado['laudo_sei'].notna()]
+    df_f = df.copy()
+    if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
+    if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
+    if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
 
-    df_filtrado = df_filtrado.reset_index(drop=True)
-    
-    # --- TABELA INTERATIVA COM AS COLUNAS SOLICITADAS ---
-    st.subheader("Fila de Processos Disponíveis (SharePoint)")
-    
-    datas_formatadas_tabela = [converter_data_excel(d) for d in df_filtrado['data_acid']]
-    volumes_formatados_tabela = [extrair_volume_texto(v) for v in df_filtrado['vol_char']]
-
-    df_exibicao = pd.DataFrame({
-        "Selecionar": [False] * len(df_filtrado),
-        "ID": df_filtrado['num_doc'].astype(str),
-        "SIEMA": df_filtrado['siema'].astype(str),
-        "Processo SEI": df_filtrado['processo_sei'].astype(str),
-        "Empresa": df_filtrado['empresa'].astype(str),
-        "SITUAÇÃO": df_filtrado['situacao'].astype(str),
-        "Fiscal": df_filtrado['fiscal_limpo'].astype(str),
-        "Data Acidente": datas_formatadas_tabela,
-        "Produto": df_filtrado['produto'].astype(str),
-        "Class OL": df_filtrado['class_ol'].astype(str),
-        "Class Risco": df_filtrado['class_risco'].astype(str),
-        "Volume (m³)": volumes_formatados_tabela,
-        "Lat Auto": df_filtrado['lat'].astype(str),
-        "Lon Auto": df_filtrado['lon'].astype(str),
-        "Multa Prevista": df_filtrado['multa_prevista'].astype(str)
+    # --- PREPARAÇÃO DA TABELA ESTILIZADA ---
+    df_exib = pd.DataFrame({
+        "Selecionar": [False] * len(df_f),
+        "ID": df_f['num_doc'],
+        "SITUAÇÃO": df_f['situacao'],
+        "Fiscal": df_f['f_limpo'],
+        "Data": [converter_data_excel(d) for d in df_f['data_acid']],
+        "Produto": df_f['produto'],
+        "Class OL": df_f['class_ol'],
+        "Risco": df_f['class_risco'],
+        "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
+        "Multa Prev": df_f['multa_prevista'],
+        "Lat": df_f['lat'],
+        "Lon": df_f['lon']
     })
+
+    # Aplicando estilização visual nas cores solicitadas
+    # Cabeçalho: Verde Musgo / Linhas: Alternado Verde Claro e Branco
+    def style_rows(s):
+        return ['background-color: #E9EDDE; color: black' if i % 2 == 0 else 'background-color: #FFFFFF; color: black' for i in range(len(s))]
+
+    st.markdown("### 📋 Processos para Análise")
     
+    # Exibe a tabela interativa
     tabela_editada = st.data_editor(
-        df_exibicao,
+        df_exib,
         hide_index=True,
-        disabled=[col for col in df_exibicao.columns if col != "Selecionar"],
+        use_container_width=True,
+        disabled=[col for col in df_exib.columns if col != "Selecionar"],
         column_config={
-            "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
+            "Selecionar": st.column_config.CheckboxColumn("Selo", default=False),
+            "ID": st.column_config.Column(width="small")
         }
     )
     
-    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
-    df_selecionados = df_filtrado.iloc[indices_selecionados]
-    
-    # --- PAINEL DE DEBUG TÉCNICO (PREVENTIVO) ---
-    if not df_selecionados.empty:
+    selecionados = df_f.iloc[tabela_editada[tabela_editada["Selecionar"] == True].index]
+
+    if not selecionados.empty:
         st.write("---")
-        with st.expander("🔍 PAINEL DE DEBUG TÉCNICO", expanded=False):
-            for idx, row in df_selecionados.iterrows():
-                st.markdown(f"**Análise do Processo ID:** `{row['num_doc']}`")
-                vol_bruto = row.get('vol_char', 'NÃO MAPEADO')
-                v_num = extrair_volume_numerico(vol_bruto)
-                v_txt = extrair_volume_texto(vol_bruto)
-                mod_detectado, risco_detectado = extrair_classe_e_modelo(row)
-                
-                st.json({
-                    "1. Colunas lidas pelo Python da Planilha do SharePoint": {
-                        "Conteúdo na Coluna 'VOL'": str(vol_bruto),
-                        "Conteúdo na Coluna 'CLASS_OL'": str(row.get('class_ol')),
-                        "Conteúdo na Coluna 'CLASS_RISCO'": str(row.get('class_risco')),
-                        "Conteúdo na Coluna 'Fiscal'": str(row.get('fiscal'))
-                    },
-                    "2. Resultados do Processamento Interno": {
-                        "Volume Numérico (Limiares)": v_num,
-                        "Volume Texto (Relatório Word)": v_txt,
-                        "Modelo de Word Selecionado": str(mod_detectado),
-                        "Letra de Risco Detectada": str(risco_detectado)
-                    }
-                })
-
-    st.write("---")
-    st.subheader("Ações de Geração")
-    
-    if df_selecionados.empty:
-        st.info("💡 Marque os processos desejados na coluna **'Selecionar'** para liberar a geração.")
-    else:
-        st.warning(f"Você selecionou **{len(df_selecionados)}** processo(s).")
+        st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
-        if st.button("🚀 Gerar Relatórios dos Processos Selecionados"):
-            for _, row in df_selecionados.iterrows():
-                modelo_arquivo, letra_risco_detectada = extrair_classe_e_modelo(row)
-                
-                if not modelo_arquivo:
-                    st.error(f"❌ Não foi possível determinar o modelo para o ID {row['num_doc']}. Certifique-se de que a coluna 'CLASS_OL' indique se é Oleoso ou Não Oleoso.")
-                    continue
-                    
-                caminho_modelo = os.path.join("modelos", modelo_arquivo)
-                
-                if not os.path.exists(caminho_modelo):
-                    st.error(f"Arquivo '{modelo_arquivo}' ausente na pasta 'modelos/'.")
+        if st.button("Gerar Documentos Word"):
+            for _, row in selecionados.iterrows():
+                modelo, risco = extrair_classe_e_modelo(row)
+                if not modelo:
+                    st.error(f"Erro no modelo para ID {row['num_doc']}")
                     continue
                 
-                def tratar_tag(valor, nome_tag):
-                    v_str = str(valor).strip()
-                    if pd.isna(valor) or v_str in ["", "nan", "None", "0", "Processo Não Encontrado"]:
-                        return f" [ {nome_tag.upper()} - EDITAR MANUAL ] "
-                    if nome_tag == "siema" and "fora do ar" in v_str.lower():
+                caminho = os.path.join("modelos", modelo)
+                if not os.path.exists(caminho):
+                    st.error(f"Arquivo {modelo} não encontrado.")
+                    continue
+
+                def t_tag(v, n):
+                    v_s = str(v).strip()
+                    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]:
+                        return f" [ {n.upper()} - EDITAR MANUAL ] "
+                    if n == "siema" and "fora do ar" in v_s.lower():
                         return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
-                    return v_str
+                    return v_s
 
-                grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
-                nivel_texto = processar_nivel(row.get('nivel', ''))
-
-                risco_final = letra_risco_detectada if letra_risco_detectada else tratar_tag(row.get('class_risco', ''), "class_risco")
-
-                dados_replace = {
-                    "<<siema>>": tratar_tag(row.get('siema', ''), "siema"),
-                    "<<processo_sei>>": tratar_tag(row.get('processo_sei', ''), "processo_sei"),
-                    "<<laudo_sei>>": tratar_tag(row.get('laudo_sei', ''), "laudo_sei").split('.')[0],
+                g_txt, g_pt = processar_grandeza(row.get('grandeza', ''))
+                
+                dados = {
+                    "<<siema>>": t_tag(row.get('siema', ''), "siema"),
+                    "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
+                    "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
                     "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
-                    "<<relat_sei>>": tratar_tag(row.get('relat_sei', ''), "raipo_sei"),
-                    "<<instalacao>>": tratar_tag(row.get('instalacao', ''), "instalacao"),
-                    "<<campo>>": tratar_tag(row.get('campo', ''), "campo"),
-                    "<<bacia>>": tratar_tag(row.get('bacia', ''), "bacia"),
-                    "<<empresa>>": tratar_tag(row.get('empresa', ''), "empresa"),
-                    "<<cnpj>>": tratar_tag(row.get('cnpj', ''), "cnpj"),
-                    "<<produto>>": tratar_tag(row.get('produto', ''), "produto"),
-                    "<<class_ol>>": tratar_tag(row.get('class_ol', ''), "class_ol"),
-                    "<<class_risco>>": risco_final,
+                    "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
+                    "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                    "<<campo>>": t_tag(row.get('campo', ''), "campo"),
+                    "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
+                    "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
+                    "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                    "<<produto>>": t_tag(row.get('produto', ''), "produto"),
+                    "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
+                    "<<class_risco>>": risco,
                     "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    "<<auto>>": tratar_tag(row.get('auto', ''), "auto_infracao"),
-                    "<<multa_num>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
-                    "<<multa_char>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
-                    "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
-                    "<<jurisdicao>>": determinar_jurisdicao(str(row.get('bacia', ''))),
-                    "<<lat_auto>>": tratar_tag(row.get('lat', ''), "lat"),
-                    "<<lon_auto>>": tratar_tag(row.get('lon', ''), "lon"),
-                    "<<grandeza>>": tratar_tag(row.get('grandeza', ''), "grandeza"),
-                    "<<grandeza_texto>>": grandeza_texto,
-                    "<<grandeza_pontos>>": grandeza_pontos,
-                    "<<nivel>>": tratar_tag(row.get('nivel', ''), "nivel"),
-                    "<<nivel_pontos>>": tratar_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
-                    "<<nivel_texto>>": nivel_texto
+                    "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
+                    "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
+                    "<<grandeza_texto>>": g_txt,
+                    "<<grandeza_pontos>>": g_pt,
+                    "<<nivel_texto>>": processar_nivel(row.get('nivel', '')),
+                    "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
                 }
                 
-                doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
-                nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', 'Revisao')}.docx"
+                doc_io = preencher_documento(caminho, dados)
+                nome = f"Rel_Fisc_{row['num_doc']}.docx"
                 
-                with st.container(border=True):
-                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    st.download_button(
-                        label=f"📥 Baixar Documento Word (ID {row['num_doc']})",
-                        data=doc_pronto_io,
-                        file_name=nome_arquivo_saida,
-                        key=f"dl_{row['num_doc']}",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                with st.expander(f"📥 ID {row['num_doc']} - {row['empresa'][:30]}...", expanded=True):
+                    st.download_button(label="Baixar Relatório", data=doc_io, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
-    st.info("Aguardando carregamento e resposta válida do Power Automate.")
+    st.info("Aguardando carregamento dos dados do SharePoint...")
