@@ -4,7 +4,6 @@ from docx import Document
 import io
 import os
 import requests
-import base64
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
@@ -50,15 +49,16 @@ def formatar_decimal(valor):
         return str(valor)
 
 def selecionar_modelo(row):
-    class_ol = str(row['class_ol']).strip()
-    class_risco = str(row['class_risco']).strip()
+    class_ol = str(row.get('class_ol', '')).strip()
+    class_risco = str(row.get('class_risco', '')).strip()
     
     try:
-        vol_num = float(str(row['vol_char']).replace(',', '.'))
+        vol_num = float(str(row.get('vol_char', '0')).replace(',', '.'))
     except (ValueError, TypeError):
         vol_num = 0.0
 
-    if class_ol == "Não Classificado" or class_risco == "OS (Não Classificado)": return None
+    if class_ol == "Não Classificado" or class_risco == "OS (Não Classificado)" or class_ol == "": 
+        return None
 
     if class_ol == "Oleoso" and class_risco == "A": return "Rel_Fisc_Oleoso_A.docx"
     if class_ol == "Oleoso" and class_risco == "B": return "Rel_Fisc_Oleoso_B.docx"
@@ -135,47 +135,46 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # Mapeamento Direto baseado EXATAMENTE nas chaves brutas que vieram do seu SharePoint
+    # MAPEAMENTO ATUALIZADO COM OS NOMES EXATOS DAS COLUNAS DA SUA PLANILHA
     colunas_map = {
         'ID': 'num_doc',
-        'processo_sei': 'processo_sei',
-        'siema': 'siema',
-        'situacao': 'situacao',
-        'laudo_sei': 'laudo_sei',
-        'data_acid': 'data_acid',
-        'relat_sei': 'relat_sei',
-        'instalacao': 'instalacao',
-        'campo': 'campo',
-        'bacia': 'bacia',
-        'empresa': 'empresa',
-        'cnpj': 'cnpj',
-        'produto': 'produto',
-        'class_ol': 'class_ol',
-        'class_risco': 'class_risco',
-        'vol_char': 'vol_char',
-        'lat': 'lat',
-        'lon': 'lon',
-        'grandeza': 'grandeza',
-        'nivel_pontos': 'nivel_pontos',
-        'nivel': 'nivel',
-        'auto': 'auto',
-        'multa_char': 'multa_char',
-        'data_ai': 'data_ai'
+        'PROCESSO': 'processo_sei',
+        'SIEMA': 'siema',
+        'Situação': 'situacao',
+        'Laudo Válido (SEI)': 'laudo_sei',
+        'DATA ACIDENTE': 'data_acid',
+        'RAIPO_SEI': 'relat_sei',
+        'INSTALAÇÃO': 'instalacao',
+        'Campo': 'campo',
+        'Bacia': 'bacia',
+        'EMPRESA': 'empresa',
+        'CNPJ': 'cnpj',
+        'PRODUTO': 'produto',
+        'CLASS_OL': 'class_ol',
+        'CLASS. RISCO': 'class_risco',
+        'VOL.': 'vol_char',
+        'Lat_Auto': 'lat',
+        'Lon_Auto': 'lon',
+        'Grandeza': 'grandeza',
+        'Nivel_Pontos': 'nivel_pontos',
+        'Nivel': 'nivel',
+        'Auto Infração': 'auto',
+        'Multa Aplicada': 'multa_char',
+        'Data_AI': 'data_ai'
     }
     
-    # Aplica o mapeamento de colunas de forma segura
+    # Aplica o mapeamento de colunas estruturado
     for col_real, col_interna in colunas_map.items():
         if col_real in df.columns:
             df[col_interna] = df[col_real]
         else:
             df[col_interna] = ""
 
-    # --- FILTRAGEM INTELIGENTE ---
-    # Limpa valores nulos e garante que campos numéricos ou strings vazias sejam tratados corretamente
+    # --- TRATAMENTO E FILTRAGEM INTELIGENTE ---
     df = df.dropna(subset=['siema'])
     df['siema'] = df['siema'].astype(str).str.strip()
     
-    # Converte laudo para string limpando decimais flutuantes se houver (ex: 123.0 -> 123)
+    # Normaliza a string do laudo eliminando pontos flutuantes do Excel/SharePoint (.0)
     def normalizar_laudo(val):
         if pd.isna(val) or val == "": return ""
         val_str = str(val).split('.')[0].strip()
@@ -183,38 +182,45 @@ if df_original is not None and not df_original.empty:
 
     df['laudo_sei'] = df['laudo_sei'].apply(normalizar_laudo)
     
-    # Filtrando apenas linhas com SIEMA preenchido e Laudo existente
+    # Mantém apenas registros válidos com SIEMA e Laudo Técnico preenchidos
     df_filtrado = df[(df['siema'] != "") & (df['siema'] != "nan") & (df['laudo_sei'] != "")].copy()
     
     st.subheader("Fila de Processos Disponíveis (SharePoint)")
     
     if df_filtrado.empty:
         st.success("Não há processos com laudos válidos na base de dados no momento!")
-        with st.expander("Ver diagnóstico técnico das linhas originais"):
-            st.write("Colunas detectadas:", list(df_original.columns))
-            st.write("Dados brutos recebidos:", df_original)
+        with st.expander("Ver diagnóstico de colunas"):
+            st.write("Colunas detectadas na planilha:", list(df_original.columns))
+            st.write("Dados brutos recebidos do Power Automate:", df_original.head(5))
     else:
-        # Injeta a coluna de checkmarks na memória do app
-        df_filtrado.insert(0, "Selecionar", False)
+        # Reseta o index de forma idêntica para manter o alinhamento visual e de memória do Pandas
+        df_filtrado = df_filtrado.reset_index(drop=True)
         
-        colunas_resumo = ['Selecionar', 'num_doc', 'siema', 'processo_sei', 'empresa', 'bacia']
-        df_exibicao = df_filtrado[colunas_resumo].loc[:, ~df_filtrado[colunas_resumo].columns.duplicated()]
+        # Constrói o DataFrame que será renderizado visualmente
+        df_exibicao = pd.DataFrame({
+            "Selecionar": [False] * len(df_filtrado),
+            "ID": df_filtrado['num_doc'].astype(str),
+            "SIEMA": df_filtrado['siema'],
+            "Processo SEI": df_filtrado['processo_sei'].astype(str),
+            "Empresa": df_filtrado['empresa'].astype(str),
+            "Bacia": df_filtrado['bacia'].astype(str)
+        })
         
-        # Renderiza a tabela interativa com checkboxes
+        # Renderiza a tabela interativa com checkboxes embutidos
         tabela_editada = st.data_editor(
             df_exibicao,
             hide_index=True,
-            disabled=['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia'],
+            disabled=["ID", "SIEMA", "Processo SEI", "Empresa", "Bacia"],
             column_config={
                 "Selecionar": st.column_config.CheckboxColumn(
                     "Selecionar",
                     help="Marque os processos que deseja gerar o relatório",
                     default=False,
-                ),
-                "num_doc": "ID"
+                )
             }
         )
         
+        # Captura as seleções corretas baseadas nos índices estritamente correspondentes
         indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
         df_selecionados = df_filtrado.iloc[indices_selecionados]
         
@@ -231,13 +237,13 @@ if df_original is not None and not df_original.empty:
                     modelo_arquivo = selecionar_modelo(row)
                     
                     if not modelo_arquivo:
-                        st.error(f"Não foi possível determinar o modelo para o SIEMA {row['siema']}. Verifique as classes de risco e tipo.")
+                        st.error(f"Não foi possível determinar o modelo para o SIEMA {row['siema']}. Verifique se as classes de risco e o tipo (Oleoso/Não Oleoso) estão preenchidos no SharePoint.")
                         continue
                         
                     caminho_modelo = os.path.join("modelos", modelo_arquivo)
                     
                     if not os.path.exists(caminho_modelo):
-                        st.error(f"O arquivo de modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'.")
+                        st.error(f"O arquivo de modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'. Certifique-se de realizar o upload dele no GitHub.")
                         continue
                         
                     grandeza_texto, grandeza_pontos = processar_grandeza(str(row.get('grandeza', '')))
@@ -256,7 +262,7 @@ if df_original is not None and not df_original.empty:
                         "<<produto>>": str(row.get('produto', '')),
                         "<<class_ol>>": str(row.get('class_ol', '')),
                         "<<class_risco>>": str(row.get('class_risco', '')),
-                        "<<vol_char>>": formatar_decimal(row.get('vol_char', '')),
+                        "<<vol_char>>": formatar_decimal(row.get('vol_char', '0')),
                         "<<auto>>": str(row.get('auto', '')),
                         "<<multa_num>>": str(row.get('multa_char', '')),
                         "<<multa_char>>": str(row.get('multa_char', '')),
