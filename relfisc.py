@@ -52,14 +52,12 @@ def formatar_decimal(valor):
 def selecionar_modelo(row):
     class_ol = str(row['class_ol']).strip()
     class_risco = str(row['class_risco']).strip()
-    gerar_rel = str(row['gerar_rel']).strip()
     
     try:
         vol_num = float(str(row['vol_char']).replace(',', '.'))
     except (ValueError, TypeError):
         vol_num = 0.0
 
-    if gerar_rel.lower() != "sim": return None
     if class_ol == "Não Classificado" or class_risco == "OS (Não Classificado)": return None
 
     if class_ol == "Oleoso" and class_risco == "A": return "Rel_Fisc_Oleoso_A.docx"
@@ -102,19 +100,17 @@ def preencher_documento(caminho_modelo, dicionario_dados):
 st.title("⚖️ Força Tarefa - Geração de Autos e Relatórios")
 
 # --- CARREGAMENTO AUTOMÁTICO VIA POWER AUTOMATE (SECRETS) ---
-@st.cache_data(ttl=300) # Atualiza o cache do SharePoint a cada 5 minutos
+@st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
         
-        # Dispara a requisição HTTP POST para o seu fluxo do Power Automate
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
         
         dados_json = resposta.json()
         
-        # O Power Automate traz os registros dentro de uma lista chamada 'value'
         if isinstance(dados_json, dict) and "value" in dados_json:
             lista_registros = dados_json["value"]
         elif isinstance(dados_json, list):
@@ -139,7 +135,7 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # 1. Normalização inteligente de nomes de colunas (Ignora acentos, espaços e caracteres técnicos do SharePoint)
+    # 1. Normalização inteligente de nomes de colunas
     def normalizar_nome_coluna(col):
         c = str(col).lower().strip()
         c = c.replace("_x0020_", "").replace(" ", "").replace("_", "")
@@ -149,11 +145,10 @@ if df_original is not None and not df_original.empty:
 
     colunas_reais = {normalizar_nome_coluna(c): c for c in df.columns}
     
-    # Dicionário alvo estruturado para corresponder à sua planilha após remover a coluna 2 e criar o "ID"
+    # Mapeamento sem a coluna rígida de filtragem externa
     mapeamento_alvo = {
         'id': 'num_doc',
         'processosei': 'processo_sei',
-        'gerarrel': 'gerar_rel',
         'siema': 'siema',
         'situacao': 'situacao',
         'laudosei': 'laudo_sei',
@@ -190,7 +185,6 @@ if df_original is not None and not df_original.empty:
         else:
             df[col_interna] = ""
 
-    # Tratamento caso o ID venha encapsulado em um dicionário de metadados do SharePoint
     def limpar_id(val):
         if isinstance(val, dict):
             return str(val.get('Value', val.get('Id', list(val.values())[0])))
@@ -198,55 +192,69 @@ if df_original is not None and not df_original.empty:
     
     df['num_doc'] = df['num_doc'].apply(limpar_id)
 
-    # --- FILTRAGEM DOS DADOS ---
+    # --- FILTRAGEM BÁSICA DE INTEGRIDADE (Garante apenas que o processo tem SIEMA e Laudo válido) ---
     df['siema'] = df['siema'].astype(str).str.strip()
     df['laudo_sei'] = df['laudo_sei'].astype(str).str.strip()
-    df['gerar_rel'] = df['gerar_rel'].astype(str).str.strip()
     
     df_filtrado = df[df['siema'] != 'nan']
     df_filtrado = df_filtrado[
         (df_filtrado['laudo_sei'] != '') & 
         (df_filtrado['laudo_sei'] != '0') & 
-        (df_filtrado['laudo_sei'] != 'nan') &
-        (df_filtrado['gerar_rel'].str.lower() == 'sim')
-    ]
+        (df_filtrado['laudo_sei'] != 'nan')
+    ].copy()
     
-    st.subheader("Processos Pendentes (Base SharePoint)")
+    st.subheader("Fila de Processos Disponíveis (SharePoint)")
     
     if df_filtrado.empty:
-        st.success("Não há processos na fila de geração no momento!")
-        st.info("💡 Certifique-se de que existam linhas no seu SharePoint onde 'Gerar Rel' seja exatamente 'Sim' e 'Laudo SEI' esteja preenchido.")
-        
-        with st.expander("Ver diagnóstico de colunas"):
-            st.write("Campos recebidos:", list(df_original.columns))
-            st.write("Amostra bruta:", df_original.head(2))
+        st.success("Não há processos com laudos válidos na base de dados no momento!")
     else:
-        # Exibição do resumo na tela
-        colunas_resumo = ['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia']
+        # 2. SISTEMA DE CHECKMARKS INTERNO DO APP
+        # Adiciona uma coluna booleana interna apenas na memória do app para a seleção
+        df_filtrado.insert(0, "Selecionar", False)
+        
+        colunas_resumo = ['Selecionar', 'num_doc', 'siema', 'processo_sei', 'empresa', 'bacia']
         df_exibicao = df_filtrado[colunas_resumo].loc[:, ~df_filtrado[colunas_resumo].columns.duplicated()]
-        st.dataframe(df_exibicao)
+        
+        # O st.data_editor renderiza os checkboxes interativos na tela de forma elegante
+        tabela_editada = st.data_editor(
+            df_exibicao,
+            hide_index=True,
+            disabled=['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia'], # Bloqueia edição do resto
+            column_config={
+                "Selecionar": st.column_config.CheckboxColumn(
+                    "Selecionar",
+                    help="Marque os processos que deseja gerar o relatório",
+                    default=False,
+                )
+            }
+        )
+        
+        # Captura os índices das linhas que o usuário marcou o checkmark
+        indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
+        df_selecionados = df_filtrado.iloc[indices_selecionados]
         
         st.write("---")
-        st.subheader("Gerar Relatório")
+        st.subheader("Ações de Geração")
         
-        opcoes_processos = df_filtrado['siema'].astype(str) + " - " + df_filtrado['empresa'].astype(str)
-        opcoes_unique = opcoes_processos.drop_duplicates().tolist()
-        processo_selecionado = st.selectbox("Selecione o processo para gerar o relatório:", opcoes_unique)
-        
-        if st.button("Gerar Documento Word"):
-            siema_alvo = processo_selecionado.split(" - ")[0]
-            row = df_filtrado[df_filtrado['siema'].astype(str) == siema_alvo].iloc[0]
+        if df_selecionados.empty:
+            st.info("💡 Marque uma ou mais caixas de seleção acima na coluna **'Selecionar'** para liberar a geração do documento.")
+        else:
+            st.warning(f"Você selecionou **{len(df_selecionados)}** processo(s) para processamento.")
             
-            modelo_arquivo = selecionar_modelo(row)
-            
-            if not modelo_arquivo:
-                st.error("Não foi possível determinar o modelo correto. Verifique as classes de risco e o tipo.")
-            else:
-                caminho_modelo = os.path.join("modelos", modelo_arquivo)
-                
-                if not os.path.exists(caminho_modelo):
-                    st.error(f"O arquivo de modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/' do repositório.")
-                else:
+            if st.button("🚀 Gerar Relatórios dos Processos Selecionados"):
+                for _, row in df_selecionados.iterrows():
+                    modelo_arquivo = selecionar_modelo(row)
+                    
+                    if not modelo_arquivo:
+                        st.error(f"Não foi possível determinar o modelo para o SIEMA {row['siema']}. Verifique as classes de risco.")
+                        continue
+                        
+                    caminho_modelo = os.path.join("modelos", modelo_arquivo)
+                    
+                    if not os.path.exists(caminho_modelo):
+                        st.error(f"O arquivo de modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'.")
+                        continue
+                        
                     grandeza_texto, grandeza_pontos = processar_grandeza(str(row.get('grandeza', '')))
                     
                     dados_replace = {
@@ -285,12 +293,15 @@ if df_original is not None and not df_original.empty:
                     doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
                     nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', '')}.docx"
                     
-                    st.success("Relatório gerado com sucesso!")
-                    st.download_button(
-                        label="📥 Baixar Relatório Word",
-                        data=doc_pronto_io,
-                        file_name=nome_arquivo_saida,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                    # Cria um box visual com o botão de download dedicado para este processo
+                    with st.container(border=True):
+                        st.write(f"📄 **Processo:** {row['processo_sei']} | **SIEMA:** {row['siema']} | **Empresa:** {row['empresa']}")
+                        st.download_button(
+                            label=f"📥 Baixar Documento Word ({row['siema']})",
+                            data=doc_pronto_io,
+                            file_name=nome_arquivo_saida,
+                            key=f"dl_{row['siema']}", # Chave única para o Streamlit mapear o botão
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
 else:
     st.info("Aguardando carregamento e resposta válida do Power Automate.")
