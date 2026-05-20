@@ -36,8 +36,8 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING: Converte floats e notações científicas garantindo a exibição
-    de até 7 casas decimais sem arredondar para 0 e aplicando a vírgula brasileira.
+    VARIÁVEL STRING: Garante que o volume venha com a formatação exata, 
+    abrindo notações científicas e mantendo até 7 casas decimais.
     """
     if pd.isna(valor) or str(valor).strip() == "":
         return " [ VOLUME - EDITAR MANUAL ] "
@@ -51,10 +51,8 @@ def extrair_volume_texto(valor):
         if num_float == 0.0:
             return "0"
             
-        # Formata com até 7 casas decimais fixas
         texto_formatado = f"{num_float:.7f}"
         
-        # Remove zeros desnecessários à direita de forma segura
         if "." in texto_formatado:
             texto_formatado = texto_formatado.rstrip('0')
             if texto_formatado.endswith('.'):
@@ -167,7 +165,7 @@ def carregar_dados_sharepoint():
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
-        dados_json = resposta.json()
+        dados_json = response = resposta.json()
         
         if isinstance(dados_json, dict) and "value" in dados_json:
             lista_registros = dados_json["value"]
@@ -186,7 +184,7 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # MAPEAMENTO ALINHADO COM OS SEUS NOVOS NOMES REAIS NO SHAREPOINT
+    # MAPEAMENTO OFICIAL E RÍGIDO BASEADO NAS 40 COLUNAS REAIS DA PLANILHA
     colunas_map = {
         'ID': 'num_doc',
         'PROCESSO': 'processo_sei',
@@ -204,14 +202,16 @@ if df_original is not None and not df_original.empty:
         'CLASS_OL': 'class_ol',
         'CLASS_RISCO': 'class_risco',
         'VOL': 'vol_char',
-        'Lat_Auto': 'lat',
-        'Lon_Auto': 'lon',
+        'Lat_Auto': 'lat',   # Caso queira exibir a coordenada informada
+        'Lon_Auto': 'lon',   # Caso queira exibir a coordenada informada
         'Grandeza': 'grandeza',
         'Nivel_Pontos': 'nivel_pontos',
         'Nivel': 'nivel',
         'AUTO_INFRACAO': 'auto',
         'MULTA_APLICADA': 'multa_char',
-        'DATA_AI': 'data_ai'
+        'Data_AI': 'data_ai',
+        'MULTA_PREVISTA': 'multa_prevista',
+        'Fiscal': 'fiscal'
     }
     
     for col_real, col_interna in colunas_map.items():
@@ -220,23 +220,69 @@ if df_original is not None and not df_original.empty:
         else:
             df[col_interna] = ""
 
-    df_filtrado = df.reset_index(drop=True)
+    # --- SEÇÃO DE FILTROS NA INTERFACE ---
+    st.subheader("🛠️ Filtros de Seleção")
+    col1, col2, col3 = st.columns(3)
     
+    with col1:
+        # Filtro de Situação (Padrão pré-selecionado: "Autuar")
+        opcoes_situacao = sorted(list(df['situacao'].astype(str).unique()))
+        default_situacao = ["Autuar"] if "Autuar" in opcoes_situacao else []
+        filtro_situacao = st.multiselect("Filtrar por SITUAÇÃO:", opcoes_situacao, default=default_situacao)
+        
+    with col2:
+        # Filtro Dinâmico de Fiscal (Trata campos em branco como 'Não Atribuído')
+        df['fiscal_limpo'] = df['fiscal'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+        opcoes_fiscal = sorted(list(df['fiscal_limpo'].unique()))
+        filtro_fiscal = st.multiselect("Filtrar por FISCAL:", ["Todos"] + opcoes_fiscal, default=["Todos"])
+        
+    with col3:
+        # Filtro de Laudo SEI (Por padrão, esconde os vazios)
+        mostrar_todos_laudos = st.checkbox("Mostrar todos (incluindo sem LAUDO_SEI)", value=False)
+
+    # --- APLICAÇÃO DOS FILTROS NO DATA-FRAME ---
+    df_filtrado = df.copy()
+    
+    if filtro_situacao:
+        df_filtrado = df_filtrado[df_filtrado['situacao'].astype(str).isin(filtro_situacao)]
+        
+    if filtro_fiscal and "Todos" not in filtro_fiscal:
+        df_filtrado = df_filtrado[df_filtrado['fiscal_limpo'].astype(str).isin(filtro_fiscal)]
+        
+    if not mostrar_todos_laudos:
+        df_filtrado = df_filtrado[df_filtrado['laudo_sei'].astype(str).str.strip() != ""]
+        df_filtrado = df_filtrado[df_filtrado['laudo_sei'].notna()]
+
+    df_filtrado = df_filtrado.reset_index(drop=True)
+    
+    # --- TABELA INTERATIVA COM AS COLUNAS SOLICITADAS ---
     st.subheader("Fila de Processos Disponíveis (SharePoint)")
     
+    datas_formatadas_tabela = [converter_data_excel(d) for d in df_filtrado['data_acid']]
+    volumes_formatados_tabela = [extrair_volume_texto(v) for v in df_filtrado['vol_char']]
+
     df_exibicao = pd.DataFrame({
         "Selecionar": [False] * len(df_filtrado),
         "ID": df_filtrado['num_doc'].astype(str),
         "SIEMA": df_filtrado['siema'].astype(str),
         "Processo SEI": df_filtrado['processo_sei'].astype(str),
         "Empresa": df_filtrado['empresa'].astype(str),
-        "Bacia": df_filtrado['bacia'].astype(str)
+        "SITUAÇÃO": df_filtrado['situacao'].astype(str),
+        "Fiscal": df_filtrado['fiscal_limpo'].astype(str),
+        "Data Acidente": datas_formatadas_tabela,
+        "Produto": df_filtrado['produto'].astype(str),
+        "Class OL": df_filtrado['class_ol'].astype(str),
+        "Class Risco": df_filtrado['class_risco'].astype(str),
+        "Volume (m³)": volumes_formatados_tabela,
+        "Lat Auto": df_filtrado['lat'].astype(str),
+        "Lon Auto": df_filtrado['lon'].astype(str),
+        "Multa Prevista": df_filtrado['multa_prevista'].astype(str)
     })
     
     tabela_editada = st.data_editor(
         df_exibicao,
         hide_index=True,
-        disabled=["ID", "SIEMA", "Processo SEI", "Empresa", "Bacia"],
+        disabled=[col for col in df_exibicao.columns if col != "Selecionar"],
         column_config={
             "Selecionar": st.column_config.CheckboxColumn("Selecionar", default=False)
         }
@@ -245,18 +291,13 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     df_selecionados = df_filtrado.iloc[indices_selecionados]
     
-    # --- BLOCO DE DEBUG TÉCNICO RETORNADO ---
+    # --- PAINEL DE DEBUG TÉCNICO (PREVENTIVO) ---
     if not df_selecionados.empty:
         st.write("---")
-        with st.expander("🔍 PAINEL DE DEBUG TÉCNICO (Nomes de Colunas Atualizados)", expanded=True):
-            st.info("Monitore aqui se as colunas 'VOL' e 'CLASS_RISCO' estão chegando preenchidas do SharePoint.")
+        with st.expander("🔍 PAINEL DE DEBUG TÉCNICO", expanded=False):
             for idx, row in df_selecionados.iterrows():
                 st.markdown(f"**Análise do Processo ID:** `{row['num_doc']}`")
-                
                 vol_bruto = row.get('vol_char', 'NÃO MAPEADO')
-                class_ol_bruta = row.get('class_ol', 'NÃO MAPEADO')
-                class_risco_bruta = row.get('class_risco', 'NÃO MAPEADO')
-                
                 v_num = extrair_volume_numerico(vol_bruto)
                 v_txt = extrair_volume_texto(vol_bruto)
                 mod_detectado, risco_detectado = extrair_classe_e_modelo(row)
@@ -264,18 +305,17 @@ if df_original is not None and not df_original.empty:
                 st.json({
                     "1. Colunas lidas pelo Python da Planilha do SharePoint": {
                         "Conteúdo na Coluna 'VOL'": str(vol_bruto),
-                        "Conteúdo na Coluna 'CLASS_OL'": str(class_ol_bruta),
-                        "Conteúdo na Coluna 'CLASS_RISCO'": str(class_risco_bruta)
+                        "Conteúdo na Coluna 'CLASS_OL'": str(row.get('class_ol')),
+                        "Conteúdo na Coluna 'CLASS_RISCO'": str(row.get('class_risco')),
+                        "Conteúdo na Coluna 'Fiscal'": str(row.get('fiscal'))
                     },
                     "2. Resultados do Processamento Interno": {
                         "Volume Numérico (Limiares)": v_num,
                         "Volume Texto (Relatório Word)": v_txt,
                         "Modelo de Word Selecionado": str(mod_detectado),
                         "Letra de Risco Detectada": str(risco_detectado)
-                    },
-                    "3. Todas as Colunas Disponíveis vindas do Power Automate": list(df.columns)
+                    }
                 })
-    # ----------------------------------------
 
     st.write("---")
     st.subheader("Ações de Geração")
