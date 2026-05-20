@@ -197,14 +197,15 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
+    # MAPEAMENTO OFICIAL DE TODAS AS COLUNAS DO SHAREPOINT
     colunas_map = {
         'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'SITUACAO': 'situacao',
         'LAUDO_SEI': 'laudo_sei', 'DATA_ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
         'INSTALACAO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
         'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS_RISCO': 'class_risco',
-        'VOL': 'vol_char', 'Lat_Auto': 'lat', 'Lon_Auto': 'lon', 'Grandeza': 'grandeza',
+        'VOL': 'vol_char', 'Lat': 'lat', 'Lon': 'lon', 'Grandeza': 'grandeza',
         'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
-        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal'
+        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos'
     }
     
     for col_real, col_interna in colunas_map.items():
@@ -232,16 +233,15 @@ if df_original is not None and not df_original.empty:
 
     df_f = df_f.reset_index(drop=True)
 
-    # --- CONTROLE DE SELEÇÃO EM MASSA (MÁGICA REATIVA) ---
+    # --- CONTROLE DE SELEÇÃO EM MASSA ---
     st.markdown("### 📋 Processos para Análise")
     
-    # Checkbox Mestre: Seu valor padrão determina o estado inicial do vetor de seleção
     marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
     vetor_selecao_inicial = [marcar_todos] * len(df_f)
 
     # --- PREPARAÇÃO DA BASE DE EXIBIÇÃO ---
     df_exib = pd.DataFrame({
-        "Selecionar": vetor_selecao_inicial, # Recebe dinamicamente True ou False baseado no checkbox de cima
+        "Selecionar": vetor_selecao_inicial,
         "ID": df_f['num_doc'].astype(str),
         "SITUAÇÃO": df_f['situacao'].astype(str),
         "Fiscal": df_f['f_limpo'].astype(str),
@@ -255,7 +255,6 @@ if df_original is not None and not df_original.empty:
         "Lon": df_f['lon'].astype(str)
     })
 
-    # Invocação direta do st.data_editor nativo com a ordenação e a seleção em massa ativas
     tabela_editada = st.data_editor(
         df_exib,
         hide_index=True,
@@ -264,7 +263,7 @@ if df_original is not None and not df_original.empty:
         column_config={
             "Selecionar": st.column_config.CheckboxColumn("Selecionar")
         },
-        key=f"editor_{marcar_todos}" # Força o reset do componente de visualização quando o checkbox mudar de estado
+        key=f"editor_{marcar_todos}"
     )
     
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
@@ -291,8 +290,9 @@ if df_original is not None and not df_original.empty:
                     if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {n.upper()} - EDITAR MANUAL ] "
                     return v_s
 
-                g_txt, g_pt = processar_grandeza(row.get('grandeza', ''))
-                
+                grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
+                nivel_texto = processar_nivel(row.get('nivel', ''))
+
                 dados = {
                     "<<siema>>": t_tag(row.get('siema', ''), "siema"),
                     "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
@@ -308,11 +308,18 @@ if df_original is not None and not df_original.empty:
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
                     "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
-                    "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
-                    "<<grandeza_texto>>": g_txt,
-                    "<<grandeza_pontos>>": g_pt,
-                    "<<nivel_texto>>": processar_nivel(row.get('nivel', '')),
+                    "<<lat>>": t_tag(row.get('lat', ''), "lat"), # Redirecionado para Lat real da tabela
+                    "<<lon>>": t_tag(row.get('lon', ''), "lon"), # Redirecionado para Lon real da tabela
+                    "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
+                    "<<grandeza_texto>>": grandeza_texto,
+                    "<<grandeza_pontos>>": grandeza_pontos,
+                    "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
+                    "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
+                    "<<nivel_texto>>": nivel_texto,
+                    "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                    "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                    "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
+                    "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
                     "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
                 }
                 
@@ -324,7 +331,6 @@ if df_original is not None and not df_original.empty:
 
         zip_buffer.seek(0)
         
-        # Se houver mais de um arquivo válido gerado, exibe o super-botão de download unificado
         if arquivos_para_zipar > 1:
             st.markdown("### 📦 Download Unificado")
             st.download_button(
@@ -350,7 +356,9 @@ if df_original is not None and not df_original.empty:
                 if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {n.upper()} - EDITAR MANUAL ] "
                 return v_s
 
-            g_txt, g_pt = processar_grandeza(row.get('grandeza', ''))
+            grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
+            nivel_texto = processar_nivel(row.get('nivel', ''))
+
             dados_unitarios = {
                 "<<siema>>": t_tag(row.get('siema', ''), "siema"),
                 "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
@@ -366,11 +374,18 @@ if df_original is not None and not df_original.empty:
                 "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                 "<<class_risco>>": risco,
                 "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                "<<lat_auto>>": t_tag(row.get('lat', ''), "lat"),
-                "<<lon_auto>>": t_tag(row.get('lon', ''), "lon"),
-                "<<grandeza_texto>>": g_txt,
-                "<<grandeza_pontos>>": g_pt,
-                "<<nivel_texto>>": processar_nivel(row.get('nivel', '')),
+                "<<lat>>": t_tag(row.get('lat', ''), "lat"),
+                "<<lon>>": t_tag(row.get('lon', ''), "lon"),
+                "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
+                "<<grandeza_texto>>": grandeza_texto,
+                "<<grandeza_pontos>>": grandeza_pontos,
+                "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
+                "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
+                "<<nivel_texto>>": nivel_texto,
+                "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
+                "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
                 "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
             }
             
