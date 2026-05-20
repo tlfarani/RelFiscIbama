@@ -10,43 +10,68 @@ from datetime import datetime, timedelta
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
 
-# --- PALETA DE CORES (CSS) ---
-# Verde Musgo: #4E5D30 | Cinza Claro: #F2F2F2 | Branco: #FFFFFF
+# --- PALETA DE CORES INTEGRAL (CSS CUSTOMIZADO) ---
+# Verde Musgo: #4E5D30 | Verde Escuro Escopo: #3A471E | Cinza Claro/Fundo: #F8F9F9 | Verde Claro Linhas: #E9EDDE
 st.markdown("""
     <style>
-    /* Estilo Geral do App */
+    /* 1. Estilo Geral e Fundo do Aplicativo */
     .stApp {
         background-color: #F8F9F9;
     }
     
-    /* Títulos e Subtítulos */
-    h1, h2, h3 {
+    /* 2. Títulos, Subtítulos e Textos de Seção */
+    h1, h2, h3, .stSubheader, p, span, label {
         color: #4E5D30 !important;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
     }
 
-    /* Botão de Geração */
+    /* 3. Botão Principal de Geração (Verde Musgo com texto claro) */
     div.stButton > button:first-child {
-        background-color: #4E5D30;
-        color: #F2F2F2;
-        border-radius: 10px;
-        border: none;
-        padding: 10px 24px;
-        font-weight: bold;
-        transition: 0.3s;
+        background-color: #4E5D30 !important;
+        color: #F2F2F2 !important;
+        border-radius: 8px !important;
+        border: 1px solid #4E5D30 !important;
+        padding: 10px 24px !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease !important;
     }
     div.stButton > button:first-child:hover {
-        background-color: #3A471E;
-        color: white;
+        background-color: #3A471E !important;
+        color: #FFFFFF !important;
+        border-color: #3A471E !important;
+        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08) !important;
     }
 
-    /* Estilização das caixas de filtros */
-    .stMultiselect, .stCheckbox, .stSelectbox {
+    /* 4. Estilização dos Containers de Filtro e Caixas Brancas */
+    [data-testid="stBlock"] {
         background-color: #FFFFFF;
-        border-radius: 5px;
+        border-radius: 8px;
+    }
+    
+    /* 5. Customização das tags internas do Multiselect */
+    span[data-baseweb="tag"] {
+        background-color: #E9EDDE !important;
+        color: #4E5D30 !important;
+        border: 1px solid #4E5D30 !important;
+    }
+    
+    /* Icone de fechar do multiselect */
+    span[data-baseweb="tag"] role[button] svg {
+        fill: #4E5D30 !important;
+    }
+
+    /* 6. Cor do Checkbox Ativo (Sobrescrevendo a cor padrão do Streamlit) */
+    input[type="checkbox"]:checked {
+        background-color: #4E5D30 !important;
+        border-color: #4E5D30 !important;
+    }
+    
+    /* 7. Ajustes finos nos cards/containers de borda */
+    div[data-testid="stElementContainer"] div[style*="border"] {
+        border-color: #E9EDDE !important;
     }
     </style>
-""", unsafe_allow_html=True) # <-- CORRIGIDO AQUI!
+""", unsafe_allow_html=True)
 
 # --- FUNÇÕES DE TRATAMENTO ---
 
@@ -280,6 +305,4 @@ if df_original is not None and not df_original.empty:
                 
                 with st.container(border=True):
                     st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    st.download_button(label="Baixar Relatório", data=doc_io, file_name=nome, key=f"dl_{row['num_doc']}")
-else:
-    st.info("Aguardando carregamento dos dados do SharePoint...")
+                    st.download_button(label="Baixar Relatório", data=doc_io, file_
