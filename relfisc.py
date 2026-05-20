@@ -37,33 +37,18 @@ def extrair_volume_numerico(valor):
 
 def extrair_volume_texto(valor):
     """
-    VARIÁVEL STRING: Formata floats normais e científicos abrindo até 7 casas decimais.
-    Usa Expressão Regular (Regex) para remover os zeros excedentes de forma segura.
+    VARIÁVEL STRING: Se o SharePoint enviar o dado preenchido, 
+    garante a exibição correta com vírgula, sem sumir com decimais.
     """
-    if pd.isna(valor):
+    if pd.isna(valor) or str(valor).strip() == "":
         return " [ VOLUME - EDITAR MANUAL ] "
         
     val_str = str(valor).strip().lower().replace("m3", "").replace("m³", "").strip()
-    if not val_str or val_str in ["nan", "none"]:
+    if val_str in ["nan", "none"]:
         return " [ VOLUME - EDITAR MANUAL ] "
         
-    try:
-        num_float = float(val_str.replace(",", "."))
-        
-        if num_float == 0.0:
-            return "0"
-            
-        # Força formatação decimal estrita fixando 7 casas na memória
-        res_texto = f"{num_float:.7f}"
-        
-        # Remove com segurança apenas os zeros finais decimais mantendo a integridade do inteiro
-        if "." in res_texto:
-            res_texto = re.sub(r'0+$', '', res_texto)  # Remove zeros à direita
-            res_texto = re.sub(r'\.$', '', res_texto)  # Se sobrou o ponto sozinho no fim, remove
-            
-        return res_texto.replace(".", ",")
-    except ValueError:
-        return val_str.replace(".", ",")
+    # Inverte ponto por vírgula para manter o padrão brasileiro de relatórios
+    return val_str.replace(".", ",")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
