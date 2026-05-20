@@ -16,13 +16,11 @@ def destacar_texto_amarelo(p, texto_procurado, texto_substituto):
     diretamente no XML do Word se o campo estiver marcado para revisão manual.
     """
     if texto_procurado in p.text:
-        # Armazena as propriedades originais de estilo do parágrafo, se necessário
         p.text = p.text.replace(texto_procurado, texto_substituto)
         
         # Percorre os fragmentos de texto (runs) para aplicar o realce em amarelo onde o texto substituto foi inserido
         for run in p.runs:
             if texto_substituto in run.text:
-                # O XML 'w:shd' aplica uma cor de fundo (shading) amarela estável no Word
                 shading_xml = f'<w:shd {nsdecls("w")} w:fill="FFFF00"/>'
                 run._r.get_or_add_rPr().append(parse_xml(shading_xml))
 
@@ -67,33 +65,41 @@ def formatar_decimal(valor):
     except ValueError:
         return str(valor)
 
-def selecionar_modelo(row):
+def extrair_classe_e_modelo(row):
+    """
+    Analisa a linha e retorna uma tupla (nome_do_modelo, letra_do_risco_detectada)
+    Garante o alinhamento perfeito entre o modelo escolhido e a tag gravada no Word.
+    """
     class_ol = str(row.get('class_ol', '')).strip().title()
-    class_risco = str(row.get('class_risco', '')).strip().upper()
+    class_risco_bruto = str(row.get('class_risco', '')).strip().upper()
     
     try:
         vol_num = float(str(row.get('vol_char', '0')).replace(',', '.'))
     except (ValueError, TypeError):
         vol_num = 0.0
 
-    # Lógica de decisão ultra-resiliente baseada em substrings
+    # Determina a letra de risco de forma resiliente
+    letra_risco = "A"
+    if "B" in class_risco_bruto: letra_risco = "B"
+    elif "C" in class_risco_bruto: letra_risco = "C"
+    elif "D" in class_risco_bruto: letra_risco = "D"
+    elif "E" in class_risco_bruto: letra_risco = "E"
+
     if "Oleoso" in class_ol and "Não" not in class_ol:
-        if "A" in class_risco: return "Rel_Fisc_Oleoso_A.docx"
-        if "B" in class_risco: return "Rel_Fisc_Oleoso_B.docx"
-        if "D" in class_risco: return "Rel_Fisc_Oleoso_D.docx"
-        # Fallback caso tenha a substância mas falte o risco regulamentar exato
-        return "Rel_Fisc_Oleoso_A.docx" 
+        if letra_risco in ["A", "B", "D"]:
+            return f"Rel_Fisc_Oleoso_{letra_risco}.docx", letra_risco
+        return "Rel_Fisc_Oleoso_A.docx", "A" 
     
     if "Não Oleoso" in class_ol or "Nao Oleoso" in class_ol:
-        if "A" in class_risco:
-            return "Rel_Fisc_Nao_Oleoso_Art_61_A.docx" if vol_num > 8 else "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"
-        if "B" in class_risco:
-            return "Rel_Fisc_Nao_Oleoso_Art_61_B.docx" if vol_num > 200 else "Rel_Fisc_Nao_Oleoso_Art_62_B.docx"
-        if "D" in class_risco:
-            return "Rel_Fisc_Nao_Oleoso_Art_62_D.docx"
-        return "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"
+        if letra_risco == "A":
+            return ("Rel_Fisc_Nao_Oleoso_Art_61_A.docx" if vol_num > 8 else "Rel_Fisc_Nao_Oleoso_Art_62_A.docx"), "A"
+        if letra_risco == "B":
+            return ("Rel_Fisc_Nao_Oleoso_Art_61_B.docx" if vol_num > 200 else "Rel_Fisc_Nao_Oleoso_Art_62_B.docx"), "B"
+        if letra_risco == "D":
+            return "Rel_Fisc_Nao_Oleoso_Art_62_D.docx", "D"
+        return "Rel_Fisc_Nao_Oleoso_Art_62_A.docx", "A"
 
-    return None
+    return None, None
 
 def preencher_documento(caminho_modelo, dicionario_dados):
     doc = Document(caminho_modelo)
@@ -102,7 +108,7 @@ def preencher_documento(caminho_modelo, dicionario_dados):
     for p in doc.paragraphs:
         for chave, valor in dicionario_dados.items():
             if chave in p.text:
-                if "EDITAR MANUAl" in str(valor):
+                if "EDITAR MANUAL" in str(valor):
                     destacar_texto_amarelo(p, chave, str(valor))
                 else:
                     p.text = p.text.replace(chave, str(valor))
@@ -114,7 +120,7 @@ def preencher_documento(caminho_modelo, dicionario_dados):
                 for p in cell.paragraphs:
                     for chave, valor in dicionario_dados.items():
                         if chave in p.text:
-                            if "EDITAR MANUAl" in str(valor):
+                            if "EDITAR MANUAL" in str(valor):
                                 destacar_texto_amarelo(p, chave, str(valor))
                             else:
                                 p.text = p.text.replace(chave, str(valor))
@@ -171,12 +177,10 @@ if df_original is not None and not df_original.empty:
         else:
             df[col_interna] = ""
 
-    # Sem filtros excludentes: exibe a totalidade das linhas recebidas
     df_filtrado = df.reset_index(drop=True)
     
     st.subheader("Fila de Processos Disponíveis (SharePoint)")
     
-    # Monta a estrutura da tabela interativa
     df_exibicao = pd.DataFrame({
         "Selecionar": [False] * len(df_filtrado),
         "ID": df_filtrado['num_doc'].astype(str),
@@ -208,10 +212,10 @@ if df_original is not None and not df_original.empty:
         
         if st.button("🚀 Gerar Relatórios dos Processos Selecionados"):
             for _, row in df_selecionados.iterrows():
-                modelo_arquivo = selecionar_modelo(row)
+                modelo_arquivo, letra_risco_detectada = extrair_classe_e_modelo(row)
                 
                 if not modelo_arquivo:
-                    st.error(f"❌ Não foi possível determinar o modelo para o ID {row['num_doc']}. Certifique-se de que a coluna 'CLASS_OL' indique se é Oleoso ou Não Oleoso no SharePoint.")
+                    st.error(f"❌ Não foi possível determinar o modelo para o ID {row['num_doc']}. Certifique-se de que a coluna 'CLASS_OL' indique se é Oleoso ou Não Oleoso.")
                     continue
                     
                 caminho_modelo = os.path.join("modelos", modelo_arquivo)
@@ -220,21 +224,24 @@ if df_original is not None and not df_original.empty:
                     st.error(f"Arquivo '{modelo_arquivo}' ausente na pasta 'modelos/'.")
                     continue
                 
-                # Tratamento de tags ausentes, vazias ou contendo erro "Processo Não Encontrado"
+                # Tratamento inteligência para tags normais
                 def tratar_tag(valor, nome_tag):
                     v_str = str(valor).strip()
                     if pd.isna(valor) or v_str in ["", "nan", "None", "0", "Processo Não Encontrado"]:
-                        return f" [{nome_tag.upper()} - EDITAR MANUAl] "
+                        return f" [{nome_tag.upper()} - EDITAR MANUAL] "
                     return v_str
 
                 grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
                 if "NÃO DEFINIDA" in grandeza_texto:
-                    grandeza_texto = " [GRANDEZA TEXTO - EDITAR MANUAl] "
-                    grandeza_pontos = " [PONTOS GRANDEZA - EDITAR MANUAl] "
+                    grandeza_texto = " [GRANDEZA TEXTO - EDITAR MANUAL] "
+                    grandeza_pontos = " [PONTOS GRANDEZA - EDITAR MANUAL] "
 
                 nivel_texto = processar_nivel(row.get('nivel', ''))
                 if "NÃO DEFINIDO" in nivel_texto:
-                    nivel_texto = " [NÍVEL TEXTO - EDITAR MANUAl] "
+                    nivel_texto = " [NÍVEL TEXTO - EDITAR MANUAL] "
+
+                # Vincula a classe de risco de forma integrada com a detecção do modelo anterior
+                risco_final = letra_risco_detectada if letra_risco_detectada else tratar_tag(row.get('class_risco', ''), "class_risco")
 
                 dados_replace = {
                     "<<siema>>": tratar_tag(row.get('siema', ''), "siema"),
@@ -249,7 +256,7 @@ if df_original is not None and not df_original.empty:
                     "<<cnpj>>": tratar_tag(row.get('cnpj', ''), "cnpj"),
                     "<<produto>>": tratar_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": tratar_tag(row.get('class_ol', ''), "class_ol"),
-                    "<<class_risco>>": tratar_tag(row.get('class_risco', ''), "class_risco"),
+                    "<<class_risco>>": risco_final,
                     "<<vol_char>>": formatar_decimal(row.get('vol_char', '0')),
                     "<<auto>>": tratar_tag(row.get('auto', ''), "auto_infracao"),
                     "<<multa_num>>": tratar_tag(row.get('multa_char', ''), "multa_aplicada"),
