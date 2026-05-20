@@ -4,27 +4,30 @@ from docx import Document
 import io
 import os
 import requests
+import base64
 
 st.set_page_config(page_title="Gerador de Relatórios de Fiscalização", layout="wide")
 
 # --- FUNÇÕES DE NEGÓCIO ---
 
 def determinar_jurisdicao(bacia):
-    if bacia == "Bacia de Santos": return "-SP"
-    if bacia == "Bacia de Campos": return "-RJ"
-    if bacia == "Bacia do Espírito Santo": return "-ES"
+    bacia_limpa = str(bacia).lower().strip()
+    if "santos" in bacia_limpa: return "-SP"
+    if "campos" in bacia_limpa: return "-RJ"
+    if "espirito santo" in bacia_limpa: return "-ES"
     return ""
 
 def processar_grandeza(grandeza):
-    if grandeza == "Potencial":
+    g = str(grandeza).strip()
+    if g == "Potencial":
         return "quando as consequências não são evidentes", "5"
-    elif grandeza == "Reduzida":
+    elif g == "Reduzida":
         return "quando os danos ambientais são locais ou temporários", "15"
-    elif grandeza == "Fraca":
+    elif g == "Fraca":
         return "quando os danos ambientais são de pequena proporção ou de baixa complexidade, gravidade ou magnitude, diante do contexto considerado", "30"
-    elif grandeza == "Moderada":
+    elif g == "Moderada":
         return "quando os danos ambientais são de proporção intermediária ou de moderada complexidade, gravidade ou magnitude, diante do contexto considerado", "50"
-    elif grandeza == "Grave":
+    elif g == "Grave":
         return "quando os danos ambientais são de grande proporção ou de alta complexidade, gravidade ou magnitude, diante do contexto considerado", "70"
     return "", ""
 
@@ -36,7 +39,7 @@ def processar_nivel(nivel):
         "D": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 25,5 milhões a 37,5 milhões de reais (Mínimo + 51% a 75% do teto)",
         "E": "Como o incidente envolveu uma empresa de grande porte, a multa irá variar de, aproximadamente, 38 milhões a 50 milhões de reais (Mínimo + 76% a 100% do teto)"
     }
-    return niveis.get(nivel, "")
+    return niveis.get(str(nivel).strip().upper(), "")
 
 def formatar_decimal(valor):
     try:
@@ -56,7 +59,7 @@ def selecionar_modelo(row):
     except (ValueError, TypeError):
         vol_num = 0.0
 
-    if gerar_rel != "Sim": return None
+    if gerar_rel.lower() != "sim": return None
     if class_ol == "Não Classificado" or class_risco == "OS (Não Classificado)": return None
 
     if class_ol == "Oleoso" and class_risco == "A": return "Rel_Fisc_Oleoso_A.docx"
@@ -99,31 +102,35 @@ def preencher_documento(caminho_modelo, dicionario_dados):
 st.title("⚖️ Força Tarefa - Geração de Autos e Relatórios")
 
 # --- CARREGAMENTO AUTOMÁTICO VIA POWER AUTOMATE (SECRETS) ---
-@st.cache_data(ttl=300) # Atualiza a cada 5 minutos
+@st.cache_data(ttl=300) # Atualiza o cache do SharePoint a cada 5 minutos
 def carregar_dados_sharepoint():
     try:
-        # Puxa a URL do webhook do Power Automate escondida nos segredos
         url = st.secrets["sharepoint"]["url_planilha"]
-        
-        # 1. Definimos o cabeçalho informando que estamos lidando com JSON
         headers = {"Content-Type": "application/json"}
         
-        # 2. Alteramos para requests.post e enviamos um JSON vazio {} 
-        # para satisfazer o gatilho do Power Automate
+        # Dispara a requisição HTTP POST para o seu fluxo do Power Automate
         resposta = requests.post(url, headers=headers, json={})
-        
-        # Dispara o erro caso o Power Automate retorne algo diferente de 200 (Sucesso)
         resposta.raise_for_status()
         
-        # 3. Transforma a resposta binária recebida do fluxo em dataframe
-        df = pd.read_excel(io.BytesIO(resposta.content), sheet_name="Processos_FT", header=0)
+        dados_json = resposta.json()
+        
+        # O Power Automate traz os registros dentro de uma lista chamada 'value'
+        if isinstance(dados_json, dict) and "value" in dados_json:
+            lista_registros = dados_json["value"]
+        elif isinstance(dados_json, list):
+            lista_registros = dados_json
+        else:
+            st.error("O formato retornado pelo Power Automate não é uma lista válida de registros.")
+            return None
+            
+        df = pd.DataFrame(lista_registros)
         return df
+        
     except requests.exceptions.HTTPError as e_http:
         st.error(f"Erro HTTP na integração com o Power Automate: {e_http}")
-        st.info("💡 Verifique se o fluxo do Power Automate está ATIVADO e se o método configurado nele aceita requisições POST.")
         return None
     except Exception as e:
-        st.error(f"Erro ao processar os dados recebidos: {e}")
+        st.error(f"Erro ao processar o JSON recebido: {e}")
         return None
 
 # Tentando carregar a base de dados
@@ -132,8 +139,7 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    # 1. Limpeza e normalização dos nomes das colunas vindas do Power Automate
-    # Remove espaços, acentos comuns e caracteres estranhos de codificação do SharePoint
+    # 1. Normalização inteligente de nomes de colunas (Ignora acentos, espaços e caracteres técnicos do SharePoint)
     def normalizar_nome_coluna(col):
         c = str(col).lower().strip()
         c = c.replace("_x0020_", "").replace(" ", "").replace("_", "")
@@ -143,7 +149,7 @@ if df_original is not None and not df_original.empty:
 
     colunas_reais = {normalizar_nome_coluna(c): c for c in df.columns}
     
-    # Mapeamento inteligente por aproximação de nome
+    # Dicionário alvo estruturado para corresponder à sua planilha após remover a coluna 2 e criar o "ID"
     mapeamento_alvo = {
         'id': 'num_doc',
         'processosei': 'processo_sei',
@@ -172,9 +178,7 @@ if df_original is not None and not df_original.empty:
         'dataai': 'data_ai'
     }
     
-    # Cria as colunas normatizadas que o app espera para rodar as regras de negócio
     for chave_normalizada, col_interna in mapeamento_alvo.items():
-        # Procura se existe alguma coluna na planilha que bate com a nossa chave
         col_encontrada = None
         for k_real in colunas_reais.keys():
             if chave_normalizada in k_real or k_real in chave_normalizada:
@@ -186,7 +190,7 @@ if df_original is not None and not df_original.empty:
         else:
             df[col_interna] = ""
 
-    # Tratamento especial para o ID (num_doc) caso ele venha como objeto/dicionário do SharePoint
+    # Tratamento caso o ID venha encapsulado em um dicionário de metadados do SharePoint
     def limpar_id(val):
         if isinstance(val, dict):
             return str(val.get('Value', val.get('Id', list(val.values())[0])))
@@ -194,15 +198,11 @@ if df_original is not None and not df_original.empty:
     
     df['num_doc'] = df['num_doc'].apply(limpar_id)
 
-    # --- RENDERIZAÇÃO DA INTERFACE ---
-    st.subheader("Processos Pendentes (Base SharePoint)")
-    
-    # Garantindo tratamento correto de strings para os filtros não falharem por espaços vazios
+    # --- FILTRAGEM DOS DADOS ---
     df['siema'] = df['siema'].astype(str).str.strip()
     df['laudo_sei'] = df['laudo_sei'].astype(str).str.strip()
     df['gerar_rel'] = df['gerar_rel'].astype(str).str.strip()
     
-    # Filtro da força-tarefa
     df_filtrado = df[df['siema'] != 'nan']
     df_filtrado = df_filtrado[
         (df_filtrado['laudo_sei'] != '') & 
@@ -211,18 +211,18 @@ if df_original is not None and not df_original.empty:
         (df_filtrado['gerar_rel'].str.lower() == 'sim')
     ]
     
+    st.subheader("Processos Pendentes (Base SharePoint)")
+    
     if df_filtrado.empty:
         st.success("Não há processos na fila de geração no momento!")
-        st.info("💡 Dica: Verifique se na sua planilha do SharePoint existem linhas onde a coluna 'Gerar Rel' está exatamente como 'Sim' e a coluna 'Laudo SEI' está preenchida.")
+        st.info("💡 Certifique-se de que existam linhas no seu SharePoint onde 'Gerar Rel' seja exatamente 'Sim' e 'Laudo SEI' esteja preenchido.")
         
-        # Se estiver em modo de teste, mostra as colunas detectadas para ajudar o administrador
-        with st.expander("Ver diagnóstico técnico de colunas recebidas"):
-            st.write("Colunas originais vindas do Power Automate:", list(df_original.columns))
-            st.write("Amostra das primeiras linhas brutas:", df_original.head(2))
+        with st.expander("Ver diagnóstico de colunas"):
+            st.write("Campos recebidos:", list(df_original.columns))
+            st.write("Amostra bruta:", df_original.head(2))
     else:
-        # Exibe os dados limpos para os fiscais
+        # Exibição do resumo na tela
         colunas_resumo = ['num_doc', 'siema', 'processo_sei', 'empresa', 'bacia']
-        # Remove colunas duplicadas se houver
         df_exibicao = df_filtrado[colunas_resumo].loc[:, ~df_filtrado[colunas_resumo].columns.duplicated()]
         st.dataframe(df_exibicao)
         
@@ -240,12 +240,12 @@ if df_original is not None and not df_original.empty:
             modelo_arquivo = selecionar_modelo(row)
             
             if not modelo_arquivo:
-                st.error("Não foi possível determinar o modelo para este processo. Verifique se as classes de risco e tipo estão preenchidas corretamente.")
+                st.error("Não foi possível determinar o modelo correto. Verifique as classes de risco e o tipo.")
             else:
                 caminho_modelo = os.path.join("modelos", modelo_arquivo)
                 
                 if not os.path.exists(caminho_modelo):
-                    st.error(f"O modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/'. Certifique-se de adicioná-lo ao GitHub.")
+                    st.error(f"O arquivo de modelo '{modelo_arquivo}' não foi encontrado na pasta 'modelos/' do repositório.")
                 else:
                     grandeza_texto, grandeza_pontos = processar_grandeza(str(row.get('grandeza', '')))
                     
@@ -280,7 +280,7 @@ if df_original is not None and not df_original.empty:
                     }
                     
                     for k, v in dados_replace.items():
-                        if v == "nan" or v == "None": dados_replace[k] = ""
+                        if v in ["nan", "None"]: dados_replace[k] = ""
                     
                     doc_pronto_io = preencher_documento(caminho_modelo, dados_replace)
                     nome_arquivo_saida = f"Rel_Fisc_{row.get('num_doc', 'X')}_{row.get('siema', '')}.docx"
@@ -293,4 +293,4 @@ if df_original is not None and not df_original.empty:
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
 else:
-    st.info("Aguardando comunicação ou carregamento correto dos dados do Power Automate.")
+    st.info("Aguardando carregamento e resposta válida do Power Automate.")
