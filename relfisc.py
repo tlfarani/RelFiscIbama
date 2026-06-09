@@ -28,21 +28,31 @@ st.markdown("""
         border: 1px solid #4E5D30 !important;
     }
 
-    /* 3. Estilização Firme dos Botões */
-    div.stButton > button:first-child, div.stDownloadButton > button:first-child {
+    /* 3. Estilização Firme dos Botões (Incluindo Botões de Link) */
+    div.stButton > button:first-child, 
+    div.stDownloadButton > button:first-child, 
+    div.stLinkButton > a {
         background-color: #4E5D30 !important;
         color: #FFFFFF !important;
         border-radius: 8px !important;
         border: 1px solid #4E5D30 !important;
         padding: 10px 24px !important;
         font-weight: bold !important;
+        text-decoration: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
     }
     div.stButton > button:first-child p, div.stDownloadButton > button:first-child p {
         color: #FFFFFF !important;
     }
-    div.stButton > button:first-child:hover, div.stDownloadButton > button:first-child:hover {
+    div.stButton > button:first-child:hover, 
+    div.stDownloadButton > button:first-child:hover, 
+    div.stLinkButton > a:hover {
         background-color: #3A471E !important;
         border-color: #3A471E !important;
+        color: #FFFFFF !important;
     }
 
     /* 4. BLINDAGEM DOS FILTROS (Força fundo claro e remove o bloco escuro) */
@@ -76,6 +86,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- BARRA LATERAL (ATALHOS E SISTEMAS) ---
+st.sidebar.header("🔗 Atalhos Rápidos")
+
+# Link para o Aprumar
+st.sidebar.link_button("⚓ Acessar APRUMAR", "https://aprumar.streamlit.app/")
+
+# Link para a Planilha do SharePoint 
+# Como o link no 'secrets' costuma ser o endpoint de API (POST), busca-se uma chave de visualização direta se houver, caso contrário usa uma URL base de visualização.
+url_view_sharepoint = st.secrets["sharepoint"].get("url_visualizacao", "https://ibamagov.sharepoint.com/")
+st.sidebar.link_button("📊 Planilha de Controle", url_view_sharepoint)
+
+st.sidebar.markdown("---")
+
 # --- FUNÇÕES DE TRATAMENTO ---
 
 def converter_data_excel(valor):
@@ -107,7 +130,6 @@ def extrair_volume_texto(valor):
         return texto_formatado.replace(".", ",")
     except ValueError: return val_str.replace(".", ",")
 
-# 🌟 FUNÇÃO GLOBAL ÚNICA E TRATADA CONTRA SIEMA FORA DO AR
 def t_tag(valor, nome_tag):
     v_s = str(valor).strip()
     if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: 
@@ -192,7 +214,7 @@ def carregar_dados_sharepoint():
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
-        dados_json = resposta.json()
+        dados_json = response_data = resposta.json()
         if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
         elif isinstance(dados_json, list): lista = dados_json
         else: return None
@@ -363,7 +385,7 @@ if df_original is not None and not df_original.empty:
                 "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
                 "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
                 "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                <<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
                 "<<campo>>": t_tag(row.get('campo', ''), "campo"),
                 "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
                 "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
