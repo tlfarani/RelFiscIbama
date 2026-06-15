@@ -1,3 +1,8 @@
+O erro ocorreu porque o trecho continha uma duplicidade com a linha `# [Mantém seu código de mapeamento de colunas aqui...]` vazia logo abaixo do primeiro `if`. O Python espera que exista código indentado dentro de qualquer estrutura de `if`, e a presença dessa linha vazia gerou o `IndentationError`.
+
+Aqui está o código completo do seu arquivo `relfisc.py` totalmente corrigido, com a duplicidade removida, as indentações ajustadas no padrão correto do Python e o painel do **FiscFlow** integrado de forma limpa:
+
+```python
 import streamlit as st
 import pandas as pd
 from docx import Document
@@ -210,9 +215,6 @@ def carregar_dados_sharepoint():
 df_original = carregar_dados_sharepoint()
 
 if df_original is not None and not df_original.empty:
-    # [Mantém seu código de mapeamento de colunas aqui...]
-        
-if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
     colunas_map = {
@@ -230,7 +232,7 @@ if df_original is not None and not df_original.empty:
         if col_real in df.columns: df[col_interna] = df[col_real]
         else: df[col_interna] = ""
 
-    # --- NOVO: METRICAS DO FLOW ---
+    # --- MÉTRICAS DO FLOW ---
     total_fila = len(df)
     aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
     
@@ -330,7 +332,7 @@ if df_original is not None and not df_original.empty:
                     "<<campo>>": t_tag(row.get('campo', ''), "campo"),
                     "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
                     "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                    "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                    <<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
                     "<<produto>>": t_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
@@ -406,7 +408,7 @@ if df_original is not None and not df_original.empty:
                 "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
                 "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
                 "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
-                "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
+                <<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
                 "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
             }
             
@@ -418,3 +420,5 @@ if df_original is not None and not df_original.empty:
                 st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
+
+```
