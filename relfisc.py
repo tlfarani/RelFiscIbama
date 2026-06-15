@@ -198,7 +198,7 @@ def carregar_dados_sharepoint():
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
-        dados_json = resposta.json()
+        dados_json = response = resposta.json()
         if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
         elif isinstance(dados_json, list): lista = dados_json
         else: return None
@@ -298,7 +298,7 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     selecionados = df_f.iloc[indices_selecionados]
 
-    if not延 eacionados.empty if not selecionados.empty:
+    if not selecionados.empty:
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
@@ -322,12 +322,12 @@ if df_original is not None and not df_original.empty:
                     "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
                     "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
                     "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
-                    "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
+                    <<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
                     "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
                     "<<campo>>": t_tag(row.get('campo', ''), "campo"),
                     "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
                     "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                    "保护cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                    "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
                     "<<produto>>": t_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
