@@ -186,6 +186,21 @@ def preencher_documento(caminho_modelo, dicionario_dados):
     buffer.seek(0)
     return buffer
 
+# --- 1º PONTO DE ADIÇÃO: NOVA FUNÇÃO DE PRÉVIA DE TEXTO ---
+def gerar_previa_texto(modelo, dicionario_dados):
+    if "Art_61" in modelo:
+        texto = "Causar poluição decorrente do lançamento irregular de <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), conforme apurado em processo nº <<processo_sei>>."
+    elif "Art_62" in modelo:
+        texto = "Lançar <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), em desacordo com o licenciamento ambiental e legislação ambiental vigente, conforme apurado em processo nº <<processo_sei>>."
+    elif "Oleoso" in modelo:
+        texto = "Efetuar a descarga de <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), em desacordo com o licenciamento ambiental e legislação ambiental vigente, conforme apurado em processo nº <<processo_sei>>."
+    else:
+        return "Texto padrão de infração indisponível para este modelo estrutural."
+
+    for chave, valor in dicionario_dados.items():
+        texto = text_replaced = texto.replace(chave, str(valor))
+    return text_replaced
+
 # --- INTERFACE ---
 st.title("🔄 FiscFlow")
 st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
@@ -410,8 +425,15 @@ if df_original is not None and not df_original.empty:
             doc_io_unitario = preencher_documento(caminho, dados_unitarios)
             nome = f"Rel_Fisc_{row['num_doc']}.docx"
             
+            # --- 2º PONTO DE ADIÇÃO: GERANDO E EXIBINDO A PRÉVIA DE TEXTO ---
+            texto_previa = gerar_previa_texto(modelo, dados_unitarios)
+            
             with st.container(border=True):
                 st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+                
+                st.markdown("**📝 Descrição Descritiva do Fato (Prévia do Relatório):**")
+                st.markdown(f"> *{texto_previa}*")
+                
                 st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
