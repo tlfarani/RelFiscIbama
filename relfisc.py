@@ -431,7 +431,7 @@ if df_original is not None and not df_original.empty:
             with st.container(border=True):
                 st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
                 
-                st.markdown("**📝 Descrição Descritiva do Fato (Prévia do Relatório):**")
+                st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
                 st.markdown(f"> *{texto_previa}*")
                 
                 st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
