@@ -1,8 +1,3 @@
-O erro ocorreu porque o trecho continha uma duplicidade com a linha `# [Mantém seu código de mapeamento de colunas aqui...]` vazia logo abaixo do primeiro `if`. O Python espera que exista código indentado dentro de qualquer estrutura de `if`, e a presença dessa linha vazia gerou o `IndentationError`.
-
-Aqui está o código completo do seu arquivo `relfisc.py` totalmente corrigido, com a duplicidade removida, as indentações ajustadas no padrão correto do Python e o painel do **FiscFlow** integrado de forma limpa:
-
-```python
 import streamlit as st
 import pandas as pd
 from docx import Document
@@ -303,7 +298,7 @@ if df_original is not None and not df_original.empty:
     indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
     selecionados = df_f.iloc[indices_selecionados]
 
-    if not selecionados.empty:
+    if not延 eacionados.empty if not selecionados.empty:
         st.write("---")
         st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
@@ -332,7 +327,7 @@ if df_original is not None and not df_original.empty:
                     "<<campo>>": t_tag(row.get('campo', ''), "campo"),
                     "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
                     "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                    <<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                    "保护cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
                     "<<produto>>": t_tag(row.get('produto', ''), "produto"),
                     "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
                     "<<class_risco>>": risco,
@@ -408,7 +403,7 @@ if df_original is not None and not df_original.empty:
                 "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
                 "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
                 "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
-                <<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
+                "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
                 "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
             }
             
@@ -420,5 +415,3 @@ if df_original is not None and not df_original.empty:
                 st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
-
-```
