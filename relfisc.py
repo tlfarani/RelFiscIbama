@@ -9,7 +9,11 @@ import zipfile
 from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
+st.set_page_config(
+    page_title="FiscFlow — IBAMA", 
+    layout="wide", 
+    page_icon="🔄"
+)
 
 # --- CUSTOMIZAÇÃO COMPLETA DE INTERFACE (BLINDAGEM VISUAL) ---
 st.markdown("""
@@ -183,7 +187,9 @@ def preencher_documento(caminho_modelo, dicionario_dados):
     return buffer
 
 # --- INTERFACE ---
-st.title("⚖️ Fila de Fiscalização - IBAMA")
+st.title("🔄 FiscFlow")
+st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
+st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
 
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
@@ -202,6 +208,25 @@ def carregar_dados_sharepoint():
         return None
 
 df_original = carregar_dados_sharepoint()
+
+if df_original is not None and not df_original.empty:
+    # [Mantém seu código de mapeamento de colunas aqui...]
+    
+    # --- NOVO: METRICAS DO FLOW ---
+    total_fila = len(df)
+    aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
+    
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric(label="Processos no Fluxo", value=total_fila)
+    with m2:
+        st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
+    with m3:
+        st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
+    
+    st.write("---")
+    
+    # --- FILTROS (Continua o seu código original...) ---
 
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
@@ -340,7 +365,7 @@ if df_original is not None and not df_original.empty:
             st.download_button(
                 label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
                 data=zip_buffer,
-                file_name=f"relatorios_ibama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
                 mime="application/zip",
                 use_container_width=True
             )
