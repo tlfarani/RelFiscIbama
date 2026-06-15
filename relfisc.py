@@ -211,23 +211,7 @@ df_original = carregar_dados_sharepoint()
 
 if df_original is not None and not df_original.empty:
     # [Mantém seu código de mapeamento de colunas aqui...]
-    
-    # --- NOVO: METRICAS DO FLOW ---
-    total_fila = len(df)
-    aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
-    
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric(label="Processos no Fluxo", value=total_fila)
-    with m2:
-        st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
-    with m3:
-        st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
-    
-    st.write("---")
-    
-    # --- FILTROS (Continua o seu código original...) ---
-
+        
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
@@ -246,6 +230,20 @@ if df_original is not None and not df_original.empty:
         if col_real in df.columns: df[col_interna] = df[col_real]
         else: df[col_interna] = ""
 
+    # --- NOVO: METRICAS DO FLOW ---
+    total_fila = len(df)
+    aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
+    
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric(label="Processos no Fluxo", value=total_fila)
+    with m2:
+        st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
+    with m3:
+        st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
+    
+    st.write("---")
+    
     # --- FILTROS ---
     with st.container(border=True):
         st.markdown("**🔍 Painel de Filtros**")
