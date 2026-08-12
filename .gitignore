@@ -1,6 +1,5 @@
 # --- Segredos e Configurações Locais ---
-.streamlit/
-secrets.toml
+.streamlit/secrets.toml
 
 # --- Arquivos Temporários do Python ---
 __pycache__/

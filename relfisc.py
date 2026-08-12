@@ -9,7 +9,11 @@ import zipfile
 from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="IBAMA - Gerador de Relatórios", layout="wide")
+st.set_page_config(
+    page_title="FiscFlow — IBAMA", 
+    layout="wide", 
+    page_icon="🔄"
+)
 
 # --- CUSTOMIZAÇÃO COMPLETA DE INTERFACE (BLINDAGEM VISUAL) ---
 st.markdown("""
@@ -204,8 +208,24 @@ def preencher_documento(caminho_modelo, dicionario_dados):
     buffer.seek(0)
     return buffer
 
+def gerar_previa_texto(modelo, dicionario_dados):
+    if "Art_61" in modelo:
+        texto = "Causar poluição decorrente do lançamento irregular de <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), conforme apurado em processo nº <<processo_sei>>."
+    elif "Art_62" in modelo:
+        texto = "Lançar <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), em desacordo com o licenciamento ambiental e legislação ambiental vigente, conforme apurado em processo nº <<processo_sei>>."
+    elif "Oleoso" in modelo:
+        texto = "Efetuar a descarga de <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), em desacordo com o licenciamento ambiental e legislação ambiental vigente, conforme apurado em processo nº <<processo_sei>>."
+    else:
+        return "Texto padrão de infração indisponível para este modelo estrutural."
+
+    for chave, valor in dicionario_dados.items():
+        texto = texto.replace(chave, str(valor))
+    return texto
+
 # --- INTERFACE ---
-st.title("⚖️ Fila de Fiscalização - IBAMA")
+st.title("🔄 FiscFlow")
+st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
+st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
 
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
@@ -243,6 +263,20 @@ if df_original is not None and not df_original.empty:
         if col_real in df.columns: df[col_interna] = df[col_real]
         else: df[col_interna] = ""
 
+    # --- MÉTRICAS DO FLOW ---
+    total_fila = len(df)
+    aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
+    
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric(label="Processos no Fluxo", value=total_fila)
+    with m2:
+        st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
+    with m3:
+        st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
+    
+    st.write("---")
+    
     # --- FILTROS ---
     with st.container(border=True):
         st.markdown("**🔍 Painel de Filtros**")
@@ -362,7 +396,7 @@ if df_original is not None and not df_original.empty:
             st.download_button(
                 label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
                 data=zip_buffer,
-                file_name=f"relatorios_ibama_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
                 mime="application/zip",
                 use_container_width=True
             )
@@ -412,8 +446,14 @@ if df_original is not None and not df_original.empty:
             doc_io_unitario = preencher_documento(caminho, dados_unitarios)
             nome = f"Rel_Fisc_{row['num_doc']}.docx"
             
+            texto_previa = gerar_previa_texto(modelo, dados_unitarios)
+            
             with st.container(border=True):
                 st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+                
+                st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
+                st.markdown(f"> *{texto_previa}*")
+                
                 st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
