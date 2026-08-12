@@ -95,9 +95,9 @@ st.sidebar.header("🔗 Atalhos Rápidos")
 
 st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
 
-# Link direto utilizando a chave url_planilha cadastrada nos Secrets
-if "sharepoint" in st.secrets and "url_planilha" in st.secrets["sharepoint"]:
-    st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_planilha"])
+# Link direto de navegação para a Planilha do SharePoint
+if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
+    st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
 
 st.sidebar.markdown("---")
 
