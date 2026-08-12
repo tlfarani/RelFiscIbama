@@ -1,3 +1,42 @@
+### 1. Sobre apagar o arquivo `secrets.toml`
+
+**Sim, você deve removê-lo do GitHub (ou garantir que ele nunca seja enviado para lá)!**
+
+A regra de ouro de segurança é: **o repositório do GitHub deve conter apenas o código do aplicativo**.
+
+* **Na Nuvem (Streamlit Cloud):** O servidor lê os segredos diretamente do painel corporativo do Streamlit (**Settings ➔ Secrets**). Você **não precisa** ter o arquivo `secrets.toml` no GitHub para o aplicativo funcionar na nuvem.
+* **No seu computador (Desenvolvimento local):** Você só usa o arquivo `.streamlit/secrets.toml` localmente para testar no seu próprio PC.
+
+#### O que fazer:
+
+1. Cadastre a URL da planilha no painel **Settings ➔ Secrets** do Streamlit Cloud (se ainda não cadastrou):
+```toml
+[sharepoint]
+url_planilha = "https://LINK_DO_POWER_AUTOMATE"
+
+```
+
+
+2. Adicione a linha `.streamlit/secrets.toml` dentro do seu arquivo **`.gitignore`** no GitHub.
+3. Pode apagar o arquivo `secrets.toml` da pasta do seu projeto local sem medo.
+
+---
+
+### 2. Análise do seu Código (`FiscFlow`)
+
+O seu código está **excelente**! A inclusão dos cartões de métricas no topo (`st.metric`) e o gerador de prévia do texto de infração (`gerar_previa_texto`) deixaram a ferramenta extremamente profissional.
+
+Identifiquei apenas **1 ajuste técnico pontual** na função `gerar_previa_texto`:
+
+* Na linha `texto = text_replaced = texto.replace(chave, str(valor))` seguida de `return text_replaced`, havia uma atribuição dupla desnecessária. Se o dicionário por algum motivo estivesse vazio, a variável `text_replaced` não seria criada, gerando um erro de execução (`UnboundLocalError`). Simplificamos a substituição para acumular na própria variável `texto`.
+
+---
+
+### 💻 Código Corrigido e Otimizado
+
+Aqui está o código completo do seu aplicativo com esse ajuste aplicado:
+
+```python
 import streamlit as st
 import pandas as pd
 from docx import Document
@@ -186,7 +225,7 @@ def preencher_documento(caminho_modelo, dicionario_dados):
     buffer.seek(0)
     return buffer
 
-# --- 1º PONTO DE ADIÇÃO: NOVA FUNÇÃO DE PRÉVIA DE TEXTO ---
+# --- FUNÇÃO DE PRÉVIA DE TEXTO (SINTAXE LIMPA E SEGURA) ---
 def gerar_previa_texto(modelo, dicionario_dados):
     if "Art_61" in modelo:
         texto = "Causar poluição decorrente do lançamento irregular de <<vol_char>> m³ (metros cúbicos) de <<produto>>, em <<data_acid>>, pela instalação <<instalacao>>, no <<campo>> localizado na <<bacia>> (coordenadas geográficas <<lat>> / <<lon>>), conforme apurado em processo nº <<processo_sei>>."
@@ -198,8 +237,8 @@ def gerar_previa_texto(modelo, dicionario_dados):
         return "Texto padrão de infração indisponível para este modelo estrutural."
 
     for chave, valor in dicionario_dados.items():
-        texto = text_replaced = texto.replace(chave, str(valor))
-    return text_replaced
+        texto = texto.replace(chave, str(valor))
+    return texto
 
 # --- INTERFACE ---
 st.title("🔄 FiscFlow")
@@ -425,7 +464,6 @@ if df_original is not None and not df_original.empty:
             doc_io_unitario = preencher_documento(caminho, dados_unitarios)
             nome = f"Rel_Fisc_{row['num_doc']}.docx"
             
-            # --- 2º PONTO DE ADIÇÃO: GERANDO E EXIBINDO A PRÉVIA DE TEXTO ---
             texto_previa = gerar_previa_texto(modelo, dados_unitarios)
             
             with st.container(border=True):
@@ -437,3 +475,5 @@ if df_original is not None and not df_original.empty:
                 st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
+
+```
