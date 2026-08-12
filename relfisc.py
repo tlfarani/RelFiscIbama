@@ -93,13 +93,11 @@ st.markdown("""
 # --- BARRA LATERAL (ATALHOS E SISTEMAS) ---
 st.sidebar.header("🔗 Atalhos Rápidos")
 
-# Link para o Aprumar
-st.sidebar.link_button("⚓ Acessar APRUMAR", "https://aprumar.streamlit.app/")
+st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
 
-# Link para a Planilha do SharePoint 
-# Como o link no 'secrets' costuma ser o endpoint de API (POST), busca-se uma chave de visualização direta se houver, caso contrário usa uma URL base de visualização.
-url_view_sharepoint = st.secrets["sharepoint"].get("url_visualizacao", "https://ibamagov.sharepoint.com/")
-st.sidebar.link_button("📊 Planilha de Controle", url_view_sharepoint)
+# Link direto de navegação para a Planilha do SharePoint
+if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
+    st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
 
 st.sidebar.markdown("---")
 
@@ -419,7 +417,7 @@ if df_original is not None and not df_original.empty:
                 "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
                 "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
                 "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                <<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
                 "<<campo>>": t_tag(row.get('campo', ''), "campo"),
                 "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
                 "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
