@@ -419,7 +419,7 @@ if df_original is not None and not df_original.empty:
                 "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
                 "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
                 "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                <<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
                 "<<campo>>": t_tag(row.get('campo', ''), "campo"),
                 "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
                 "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
