@@ -93,13 +93,11 @@ st.markdown("""
 # --- BARRA LATERAL (ATALHOS E SISTEMAS) ---
 st.sidebar.header("🔗 Atalhos Rápidos")
 
-# Link para o Aprumar
-st.sidebar.link_button("⚓ Acessar APRUMAR", "https://aprumar.streamlit.app/")
+st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
 
-# Link para a Planilha do SharePoint 
-# Como o link no 'secrets' costuma ser o endpoint de API (POST), busca-se uma chave de visualização direta se houver, caso contrário usa uma URL base de visualização.
-url_view_sharepoint = st.secrets["sharepoint"].get("url_visualizacao", "https://ibamagov.sharepoint.com/")
-st.sidebar.link_button("📊 Planilha de Controle", url_view_sharepoint)
+# Link direto utilizando a chave url_planilha cadastrada nos Secrets
+if "sharepoint" in st.secrets and "url_planilha" in st.secrets["sharepoint"]:
+    st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_planilha"])
 
 st.sidebar.markdown("---")
 
