@@ -551,72 +551,72 @@ if df_original is not None and not df_original.empty:
                     zip_file.writestr(nome_arquivo, doc_io.getvalue())
                     arquivos_para_zipar += 1
 
-        zip_buffer.seek(0)
-        
-        if arquivos_para_zipar > 1:
-            st.markdown("### 📦 Download Unificado")
-            st.download_button(
-                label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
-                data=zip_buffer,
-                file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-            st.write("---")
+            zip_buffer.seek(0)
+            
+            if arquivos_para_zipar > 1:
+                st.markdown("### 📦 Download Unificado")
+                st.download_button(
+                    label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
+                    data=zip_buffer,
+                    file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+                st.write("---")
 
-        st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
-        for _, row in selecionados.iterrows():
-            modelo, risco = extrair_classe_e_modelo(row)
-            if not modelo: continue
-            
-            caminho = os.path.join("modelos", modelo)
-            if not os.path.exists(caminho): continue
-
-            grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
-            nivel_texto = processar_nivel(row.get('nivel', ''))
-
-            dados_unitarios = {
-                "<<siema>>": t_tag(row.get('siema', ''), "siema"),
-                "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
-                "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
-                "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
-                "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
-                "<<campo>>": t_tag(row.get('campo', ''), "campo"),
-                "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
-                "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
-                "<<produto>>": t_tag(row.get('produto', ''), "produto"),
-                "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
-                "<<class_risco>>": risco,
-                "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                "<<lat>>": t_tag(row.get('lat', ''), "lat"),
-                "<<lon>>": t_tag(row.get('lon', ''), "lon"),
-                "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
-                "<<grandeza_texto>>": grandeza_texto,
-                "<<grandeza_pontos>>": grandeza_pontos,
-                "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
-                "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
-                "<<nivel_texto>>": nivel_texto,
-                "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
-                "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
-                "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
-                "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
-                "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
-            }
-            
-            doc_io_unitario = preencher_documento(caminho, dados_unitarios)
-            nome = f"Rel_Fisc_{row['num_doc']}.docx"
-            
-            texto_previa = gerar_previa_texto(modelo, dados_unitarios)
-            
-            with st.container(border=True):
-                st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+            st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
+            for _, row in selecionados.iterrows():
+                modelo, risco = extrair_classe_e_modelo(row)
+                if not modelo: continue
                 
-                st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
-                st.markdown(f"> *{texto_previa}*")
+                caminho = os.path.join("modelos", modelo)
+                if not os.path.exists(caminho): continue
+
+                grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
+                nivel_texto = processar_nivel(row.get('nivel', ''))
+
+                dados_unitarios = {
+                    "<<siema>>": t_tag(row.get('siema', ''), "siema"),
+                    "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
+                    "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
+                    "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
+                    "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
+                    "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                    "<<campo>>": t_tag(row.get('campo', ''), "campo"),
+                    "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
+                    "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
+                    "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                    "<<produto>>": t_tag(row.get('produto', ''), "produto"),
+                    "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
+                    "<<class_risco>>": risco,
+                    "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
+                    "<<lat>>": t_tag(row.get('lat', ''), "lat"),
+                    "<<lon>>": t_tag(row.get('lon', ''), "lon"),
+                    "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
+                    "<<grandeza_texto>>": grandeza_texto,
+                    "<<grandeza_pontos>>": grandeza_pontos,
+                    "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
+                    "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
+                    "<<nivel_texto>>": nivel_texto,
+                    "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                    "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                    "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
+                    "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
+                    "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
+                }
                 
-                st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
+                doc_io_unitario = preencher_documento(caminho, dados_unitarios)
+                nome = f"Rel_Fisc_{row['num_doc']}.docx"
+                
+                texto_previa = gerar_previa_texto(modelo, dados_unitarios)
+                
+                with st.container(border=True):
+                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+                    
+                    st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
+                    st.markdown(f"> *{texto_previa}*")
+                    
+                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
