@@ -265,6 +265,9 @@ if df_original is not None and not df_original.empty:
         if col_real in df.columns: df[col_interna] = df[col_real]
         else: df[col_interna] = ""
 
+    # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
+    df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
+
     # =========================================================================
     # 🔬 PÁGINA 1: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
     # =========================================================================
