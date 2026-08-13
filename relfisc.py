@@ -228,13 +228,14 @@ def gerar_previa_texto(modelo, dicionario_dados):
         texto = texto.replace(chave, str(valor))
     return texto
 
-# --- CARREGAMENTO CENTRALIZADO DE DADOS ---
+# --- CARREGAMENTO CENTRALIZADO DE DADOS (FLUXO UNIFICADO) ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
-        resposta = requests.post(url, headers=headers, json={})
+        # Informa explicitamente a ação "LER" ao Power Automate
+        resposta = requests.post(url, headers=headers, json={"acao": "LER"})
         resposta.raise_for_status()
         dados_json = resposta.json()
         if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
@@ -488,7 +489,7 @@ if df_original is not None and not df_original.empty:
                 key=f"editor_coord_{marcar_coord}"
             )
 
-            # --- PROCESSAMENTO DO DISPARO PARA O SHAREPOINT ---
+            # --- PROCESSAMENTO DO DISPARO PARA O FLUXO UNIFICADO DO POWER AUTOMATE ---
             if btn_atualizar:
                 indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
                 
@@ -501,28 +502,29 @@ if df_original is not None and not df_original.empty:
                     ids_alvo = df_coord.iloc[indices_marcados]['num_doc'].tolist()
 
                     payload_atualizacao = {
+                        "acao": "ATUALIZAR",
                         "processos_sei": processos_alvo,
                         "ids": ids_alvo,
                         "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else None,
                         "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else None,
-                        "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else None,
-                        "data_alteracao": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else None
                     }
 
-                    url_atualizacao = st.secrets.get("sharepoint", {}).get("url_atualizacao")
+                    url_planilha = st.secrets["sharepoint"]["url_planilha"]
                     
-                    if url_atualizacao:
-                        try:
-                            resp = requests.post(url_atualizacao, json=payload_atualizacao, headers={"Content-Type": "application/json"})
+                    try:
+                        with st.spinner("Atualizando registros no SharePoint..."):
+                            resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
                             resp.raise_for_status()
-                            st.success(f"✅ Solicitação de atualização enviada para {len(processos_alvo)} processos! A planilha do SharePoint será atualizada em instantes.")
-                            st.cache_data.clear() # Limpa o cache para recarregar a planilha atualizada
-                        except Exception as e:
-                            st.error(f"Erro ao disparar atualização para o Power Automate: {e}")
-                    else:
-                        st.success(f"✅ Sinal gerado para {len(processos_alvo)} processos selecionados!")
-                        st.info("💡 **Integração com Power Automate:** Para efetivar a gravação automática no SharePoint, crie um fluxo HTTP POST no Power Automate e cadastre a chave `url_atualizacao` nos Secrets do Streamlit Cloud.")
-                        st.json(payload_atualizacao)
+                        
+                        st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
+                        
+                        # Limpa o cache e recarrega os dados imediatamente
+                        st.cache_data.clear()
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Erro ao enviar atualização para o Power Automate: {e}")
 
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
