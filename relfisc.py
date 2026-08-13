@@ -228,13 +228,14 @@ def gerar_previa_texto(modelo, dicionario_dados):
         texto = texto.replace(chave, str(valor))
     return texto
 
-# --- CARREGAMENTO CENTRALIZADO DE DADOS ---
+# --- CARREGAMENTO CENTRALIZADO DE DADOS (FLUXO UNIFICADO) ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
-        resposta = requests.post(url, headers=headers, json={})
+        # Informa a ação "LER" de forma padronizada
+        resposta = requests.post(url, headers=headers, json={"acao": "LER"})
         resposta.raise_for_status()
         dados_json = resposta.json()
         if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
@@ -313,96 +314,217 @@ if df_original is not None and not df_original.empty:
     # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
     # =========================================================================
     if pagina == "👑 Coordenação":
-        st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
-        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento do desempenho da força-tarefa")
+        st.title("👑 Coordenação — Gestão da Esteira & Distribuição")
+        st.caption("Painel de acompanhamento macro, distribuição de carga e gestão da força-tarefa")
 
-        # --- CARDS DE KPIs GLOBAIS ---
-        tot_ft = len(df)
-        laudo_vazio = df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])
-        pend_laudo = len(df[laudo_vazio])
-        
-        situ_s = df['situacao'].astype(str).str.strip().str.lower()
-        auto_s = df['auto'].astype(str).str.strip()
-        
-        is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
-        is_ai = situ_s == 'processo ai gerado'
-        
-        pend_auto = len(df[(~laudo_vazio) & (~is_auto)])
-        pend_proc_ai = len(df[is_auto & (~is_ai)])
-        concluidos = len(df[is_ai])
+        tab_dash, tab_planilha = st.tabs(["📊 Dashboard", "📋 Planilha Geral & Atribuições"])
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Total de Processos FT", tot_ft)
-        c2.metric("Pendentes de Laudo", pend_laudo)
-        c3.metric("Pendentes de Auto", pend_auto)
-        c4.metric("Pendentes Proc. AI", pend_proc_ai)
-        c5.metric("Proc. AI Gerados", concluidos)
-
-        st.write("---")
-
-        # --- CARGA DE TRABALHO POR ANALISTA E FISCAL ---
-        col_g1, col_g2 = st.columns(2)
-
-        with col_g1:
-            st.markdown("### 🔬 Carga por Servidor de Laudo")
-            df_l = df.copy()
-            df_l['Status_Laudo'] = df_l['laudo_sei'].apply(lambda x: 'Concluído' if str(x).strip() not in ["", "nan", "None"] else 'Pendente')
-            df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
+        # --- ABA 1: DASHBOARD ---
+        with tab_dash:
+            tot_ft = len(df)
+            laudo_vazio = df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])
+            pend_laudo = len(df[laudo_vazio])
             
-            fig_laudo = px.bar(
-                df_l_g, 
-                y='s_laudo_limpo', 
-                x='Quantidade', 
-                color='Status_Laudo',
-                orientation='h',
-                text_auto=True,
-                color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#4E5D30'}
-            )
-            fig_laudo.update_traces(textposition='auto')
-            fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
-            st.plotly_chart(fig_laudo, use_container_width=True)
-
-        with col_g2:
-            st.markdown("### ⚖️ Carga por Fiscal Responsável")
-            df_fisc = df.copy()
-            df_f_g = df_fisc.groupby(['f_limpo', 'situacao']).size().reset_index(name='Quantidade')
+            situ_s = df['situacao'].astype(str).str.strip().str.lower()
+            auto_s = df['auto'].astype(str).str.strip()
             
-            fig_fisc = px.bar(
-                df_f_g, 
-                y='f_limpo', 
-                x='Quantidade', 
+            is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
+            is_ai = situ_s == 'processo ai gerado'
+            
+            pend_auto = len(df[(~laudo_vazio) & (~is_auto)])
+            pend_proc_ai = len(df[is_auto & (~is_ai)])
+            concluidos = len(df[is_ai])
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Total de Processos FT", tot_ft)
+            c2.metric("Pendentes de Laudo", pend_laudo)
+            c3.metric("Pendentes de Auto", pend_auto)
+            c4.metric("Pendentes Proc. AI", pend_proc_ai)
+            c5.metric("Proc. AI Gerados", concluidos)
+
+            st.write("---")
+
+            col_g1, col_g2 = st.columns(2)
+
+            with col_g1:
+                st.markdown("### 🔬 Carga por Servidor de Laudo")
+                df_l = df.copy()
+                df_l['Status_Laudo'] = df_l['laudo_sei'].apply(lambda x: 'Concluído' if str(x).strip() not in ["", "nan", "None"] else 'Pendente')
+                df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
+                
+                fig_laudo = px.bar(
+                    df_l_g, 
+                    y='s_laudo_limpo', 
+                    x='Quantidade', 
+                    color='Status_Laudo',
+                    orientation='h',
+                    text_auto=True,
+                    color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#4E5D30'}
+                )
+                fig_laudo.update_traces(textposition='auto')
+                fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
+                st.plotly_chart(fig_laudo, use_container_width=True)
+
+            with col_g2:
+                st.markdown("### ⚖️ Carga por Fiscal Responsável")
+                df_fisc = df.copy()
+                df_f_g = df_fisc.groupby(['f_limpo', 'situacao']).size().reset_index(name='Quantidade')
+                
+                fig_fisc = px.bar(
+                    df_f_g, 
+                    y='f_limpo', 
+                    x='Quantidade', 
+                    color='situacao',
+                    orientation='h',
+                    text_auto=True
+                )
+                fig_fisc.update_traces(textposition='auto')
+                fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
+                st.plotly_chart(fig_fisc, use_container_width=True)
+
+            st.write("---")
+
+            st.markdown("### 🌊 Distribuição de Processos por Bacia Sedimentar")
+            df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
+            fig_bacia = px.bar(
+                df_bacia, 
+                x='bacia', 
+                y='Quantidade', 
                 color='situacao',
-                orientation='h',
+                barmode='group',
                 text_auto=True
             )
-            fig_fisc.update_traces(textposition='auto')
-            fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
-            st.plotly_chart(fig_fisc, use_container_width=True)
+            fig_bacia.update_traces(textposition='outside')
+            fig_bacia.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=False, title=None)
+            fig_bacia.update_xaxes(showgrid=False)
+            fig_bacia.update_layout(
+                xaxis_title="Bacia Sedimentar", 
+                yaxis_title=None,
+                bargap=0.3,
+                bargroupgap=0.15,
+                margin=dict(l=0, r=0, t=20, b=0)
+            )
+            st.plotly_chart(fig_bacia, use_container_width=True)
 
-        st.write("---")
+        # --- ABA 2: PLANILHA GERAL E ATRIBUIÇÕES ---
+        with tab_planilha:
+            st.markdown("### 📋 Base Completa de Processos da Força-Tarefa")
 
-        # --- DISTRIBUIÇÃO POR BACIA SEDIMENTAR ---
-        st.markdown("### 🌊 Distribuição de Processos por Bacia Sedimentar")
-        df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
-        fig_bacia = px.bar(
-            df_bacia, 
-            x='bacia', 
-            y='Quantidade', 
-            color='situacao',
-            barmode='group',
-            text_auto=True
-        )
-        fig_bacia.update_traces(textposition='outside')
-        fig_bacia.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=False, title=None)
-        fig_bacia.update_xaxes(showgrid=False)
-        fig_bacia.update_layout(
-            xaxis_title="Bacia Sedimentar", 
-            yaxis_title=None,
-            bargap=0.3,       # Espaçamento entre grupos de bacias
-            bargroupgap=0.15, # Espaçamento entre barras do mesmo grupo
-            margin=dict(l=0, r=0, t=20, b=0)
-        )
-        st.plotly_chart(fig_bacia, use_container_width=True)
+            # --- PAINEL DE FILTROS SUPERIORES ---
+            with st.container(border=True):
+                st.markdown("**🔍 Filtros de Visualização**")
+                f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+                
+                with f_col1:
+                    op_bacia_c = ["Todas"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
+                    sel_bacia_c = st.selectbox("Bacia Sedimentar:", op_bacia_c, index=0)
+                with f_col2:
+                    op_serv_c = ["Todos"] + sorted(df['s_laudo_limpo'].unique())
+                    sel_serv_c = st.selectbox("Servidor Laudo:", op_serv_c, index=0)
+                with f_col3:
+                    op_fisc_c = ["Todos"] + sorted(df['f_limpo'].unique())
+                    sel_fisc_c = st.selectbox("Fiscal Responsável:", op_fisc_c, index=0)
+                with f_col4:
+                    op_situ_c = ["Todas"] + sorted(df['situacao'].astype(str).unique())
+                    sel_situ_c = st.selectbox("Situação:", op_situ_c, index=0)
+
+            # Aplicação dos Filtros
+            df_coord = df.copy()
+            if sel_bacia_c != "Todas":
+                df_coord = df_coord[df_coord['bacia'].astype(str) == sel_bacia_c]
+            if sel_serv_c != "Todos":
+                df_coord = df_coord[df_coord['s_laudo_limpo'].astype(str) == sel_serv_c]
+            if sel_fisc_c != "Todos":
+                df_coord = df_coord[df_coord['f_limpo'].astype(str) == sel_fisc_c]
+            if sel_situ_c != "Todas":
+                df_coord = df_coord[df_coord['situacao'].astype(str) == sel_situ_c]
+
+            df_coord = df_coord.reset_index(drop=True)
+
+            # --- PAINEL DE AÇÕES DE ATRIBUIÇÃO EM LOTE ---
+            with st.container(border=True):
+                st.markdown("**⚡ Painel de Atribuição e Alteração em Lote**")
+                a_col1, a_col2, a_col3, a_col4 = st.columns(4)
+                
+                lista_servidores = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
+                lista_fiscais = sorted([f for s in [df['f_limpo'].unique()] for f in s if f != "Não Atribuído"])
+                lista_situacoes = sorted([s for s in df['situacao'].astype(str).unique() if s])
+
+                with a_col1:
+                    novo_servidor = st.selectbox("Atribuir Servidor Laudo:", ["[ Não Alterar ]"] + lista_servidores)
+                with a_col2:
+                    novo_fiscal = st.selectbox("Atribuir Fiscal:", ["[ Não Alterar ]"] + lista_fiscais)
+                with a_col3:
+                    nova_situacao = st.selectbox("Alterar Situação:", ["[ Não Alterar ]"] + lista_situacoes)
+                with a_col4:
+                    st.write("") # alinhamento vertical do botão
+                    st.write("")
+                    btn_atualizar = st.button("🔄 Aplicar Alterações no SharePoint", use_container_width=True)
+
+            marcar_coord = st.checkbox("✅ Marcar todos os processos visíveis abaixo", value=False)
+
+            # --- TABELA INTERATIVA COM CHECKBOXES ---
+            df_coord_exib = pd.DataFrame({
+                "Selecionar": [marcar_coord] * len(df_coord),
+                "ID": df_coord['num_doc'].astype(str),
+                "PROCESSO": df_coord['processo_sei'].astype(str),
+                "SITUAÇÃO": df_coord['situacao'].astype(str),
+                "Servidor Laudo": df_coord['s_laudo_limpo'].astype(str),
+                "Fiscal": df_coord['f_limpo'].astype(str),
+                "Bacia": df_coord['bacia'].astype(str),
+                "Empresa": df_coord['empresa'].astype(str),
+                "Instalação": df_coord['instalacao'].astype(str),
+                "Produto": df_coord['produto'].astype(str),
+                "Vol (m³)": [extrair_volume_texto(v) for v in df_coord['vol_char']],
+                "Laudo SEI": df_coord['laudo_sei'].astype(str),
+                "Auto Infração": df_coord['auto'].astype(str)
+            })
+
+            tabela_coord_editada = st.data_editor(
+                df_coord_exib,
+                hide_index=True,
+                use_container_width=True,
+                disabled=[col for col in df_coord_exib.columns if col != "Selecionar"],
+                column_config={"Selecionar": st.column_config.CheckboxColumn("Selecionar")},
+                key=f"editor_coord_{marcar_coord}"
+            )
+
+            # --- PROCESSAMENTO DO DISPARO PARA O FLUXO UNIFICADO DO POWER AUTOMATE ---
+            if btn_atualizar:
+                indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
+                
+                if len(indices_marcados) == 0:
+                    st.warning("⚠️ Marque pelo menos um processo na tabela abaixo antes de aplicar as alterações.")
+                elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]" and nova_situacao == "[ Não Alterar ]":
+                    st.info("💡 Escolha ao menos uma alteração (Servidor, Fiscal ou Situação) nos menus acima.")
+                else:
+                    processos_alvo = [str(p) for p in df_coord.iloc[indices_marcados]['processo_sei'].tolist()]
+                    ids_alvo = [str(i) for i in df_coord.iloc[indices_marcados]['num_doc'].tolist()]
+
+                    payload_atualizacao = {
+                        "acao": "ATUALIZAR",
+                        "processos_sei": processos_alvo,
+                        "ids": ids_alvo,
+                        "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else "",
+                        "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else "",
+                        "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else ""
+                    }
+
+                    url_planilha = st.secrets["sharepoint"]["url_planilha"]
+                    
+                    try:
+                        with st.spinner("Atualizando registros no SharePoint..."):
+                            resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
+                            resp.raise_for_status()
+                        
+                        st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
+                        
+                        # Limpa o cache local e recarrega a página
+                        st.cache_data.clear()
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Erro ao enviar atualização para o Power Automate: {e}")
 
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
