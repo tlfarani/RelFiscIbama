@@ -211,6 +211,9 @@ def gerar_previa_texto(modelo, dicionario_dados):
     return texto
 
 # --- CARREGAMENTO CENTRALIZADO DE DADOS E EQUIPE ---
+import json
+
+# --- CARREGAMENTO CENTRALIZADO DE DADOS E EQUIPE ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
@@ -218,9 +221,21 @@ def carregar_dados_sharepoint():
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={"acao": "LER"})
         resposta.raise_for_status()
-        dados_json = resposta.json()
         
-        # Suporta tanto retorno único quanto chaveiro com tabela de equipe
+        texto_resposta = resposta.text.strip()
+        
+        # Tenta fazer o parse JSON padrão
+        try:
+            dados_json = json.loads(texto_resposta)
+        except json.JSONDecodeError as e:
+            # Caso haja caracteres extras no final (Extra data), tenta isolar o primeiro objeto JSON válido
+            st.warning(f"⚠️ Aviso de formato no Power Automate ({e}). Tentando recuperar o conteúdo principal...")
+            
+            # Tenta decodificar até o ponto de erro se for Extra data
+            decoder = json.JSONDecoder()
+            dados_json, _ = decoder.raw_decode(texto_resposta)
+
+        # Suporta tanto retorno unificado quanto lista direta
         if isinstance(dados_json, dict):
             proc_list = dados_json.get("processos", dados_json.get("value", []))
             equipe_list = dados_json.get("equipe", [])
@@ -231,6 +246,7 @@ def carregar_dados_sharepoint():
             return None, None
             
         return pd.DataFrame(proc_list), pd.DataFrame(equipe_list)
+        
     except Exception as e:
         st.error(f"Erro ao carregar dados do SharePoint: {e}")
         return None, None
