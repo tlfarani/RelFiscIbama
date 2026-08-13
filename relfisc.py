@@ -314,33 +314,57 @@ if df_original is not None and not df_original.empty:
         })
         df_equipe = df_equipe[~df_equipe['nome'].isin(["", "nan", "None"])].reset_index(drop=True)
 
-    # --- IDENTIFICAÇÃO E AUTENTICAÇÃO DO USUÁRIO ---
-    email_usuario_logado = getattr(st, "user", None) and getattr(st.user, "email", None)
+    # --- IDENTIFICAÇÃO E AUTENTICAÇÃO ESTRITA DO USUÁRIO ---
+    # Tenta capturar o e-mail autenticado nativamente pelo Streamlit Cloud OTP
+    email_usuario_logado = None
     
-    if not email_usuario_logado:
-        email_usuario_logado = st.sidebar.text_input("👤 E-mail de Acesso (Simulação):", value="tiago.farani@ibama.gov.br")
+    if hasattr(st, "user") and getattr(st.user, "email", None):
+        email_usuario_logado = st.user.email
+    elif hasattr(st, "experimental_user") and getattr(st.experimental_user, "email", None):
+        email_usuario_logado = st.experimental_user.email
 
-    perfil_usuario = "Visitante"
-    nome_usuario = email_usuario_logado
+    # Se o e-mail não foi fornecido pelo Streamlit Cloud (ex: ambiente local de dev), exibe caixa de simulação
+    if not email_usuario_logado:
+        st.sidebar.warning("⚠️ Modo Local / Público")
+        email_usuario_logado = st.sidebar.text_input(
+            "👤 E-mail de Acesso (Simulação):", 
+            value="", 
+            placeholder="seu.email@ibama.gov.br"
+        )
+    else:
+        st.sidebar.success("🔒 Autenticado via Streamlit Cloud")
+
+    perfil_usuario = "Não Cadastrado"
+    nome_usuario = email_usuario_logado.strip() if email_usuario_logado and email_usuario_logado.strip() else "Usuário Não Autenticado"
     
-    if not df_equipe.empty:
+    # Validação rigorosa contra a aba Equipe
+    if not df_equipe.empty and email_usuario_logado and email_usuario_logado.strip():
         match_u = df_equipe[df_equipe['email'].str.lower() == email_usuario_logado.strip().lower()]
         if not match_u.empty:
-            perfil_usuario = match_u.iloc[0]['perfil']
-            nome_usuario = match_u.iloc[0]['nome']
+            perfil_usuario = str(match_u.iloc[0]['perfil']).strip()
+            nome_usuario = str(match_u.iloc[0]['nome']).strip()
+        else:
+            perfil_usuario = "Não Cadastrado na Equipe"
     else:
-        perfil_usuario = "Coordenação"
+        if df_equipe.empty:
+            perfil_usuario = "Aba Equipe Não Configurada"
 
+    # Validação estrita: apenas o perfil 'Coordenação' ou 'Admin' acessa a tela de Coordenação
     is_coordenador = perfil_usuario.lower() in ["coordenação", "coordenacao", "admin"]
 
     # --- NAVEGAÇÃO CONDICIONAL ---
     modulos_disponiveis = []
-    if is_coordenador: modulos_disponiveis.append("👑 Coordenação")
+    if is_coordenador: 
+        modulos_disponiveis.append("👑 Coordenação")
+    
     modulos_disponiveis.extend(["🔬 Análise Técnica", "⚖️ Fiscalização"])
 
     st.sidebar.title("📌 Navegação")
-    st.sidebar.caption(f"👤 **{nome_usuario}** ({perfil_usuario})")
+    st.sidebar.caption(f"👤 **{nome_usuario}**\n\n🔰 Perfil: `{perfil_usuario}`")
     
+    if not is_coordenador:
+        st.sidebar.info("💡 Para acessar o módulo de Coordenação, seu e-mail deve estar cadastrado com perfil 'Coordenação' na aba Equipe da planilha.")
+
     pagina = st.sidebar.radio("Selecione o Módulo:", modulos_disponiveis, index=0)
 
     st.sidebar.markdown("---")
@@ -395,7 +419,6 @@ if df_original is not None and not df_original.empty:
             with col_g1:
                 st.markdown("### 🔬 Carga por Servidor de Laudo")
                 df_l = df.copy()
-                # Carga pendente real = situação 'Fazer Laudo' e sem número de Laudo SEI
                 df_l['is_pendente'] = (df_l['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
                                       (df_l['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
                 df_l['Status_Laudo'] = df_l['is_pendente'].apply(lambda x: 'Pendente (Fazer Laudo)' if x else 'Concluído')
@@ -625,7 +648,6 @@ if df_original is not None and not df_original.empty:
                 else:
                     df_alvo_dist = df_pend.head(qtd_distribuir).copy()
                     
-                    # Carga ativa atual real (processos em 'Fazer Laudo' sem laudo_sei para laudos / 'Autuar' sem auto para fiscais)
                     if "Laudo" in tipo_tarefa:
                         cargas = {}
                         for s in servidores_selecionados:
