@@ -249,25 +249,60 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    colunas_map = {
-        'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'SITUACAO': 'situacao',
-        'LAUDO_SEI': 'laudo_sei', 'DATA_ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
-        'INSTALACAO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
-        'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS_RISCO': 'class_risco',
-        'VOL': 'vol_char', 'Lat': 'lat', 'Lon': 'lon', 'Grandeza': 'grandeza',
-        'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
-        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos',
-        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto',
-        'SERVIDOR_LAUDO': 'servidor_laudo', 'Servidor_Laudo': 'servidor_laudo'
+    # 1. Limpa espaços invisíveis nos nomes dos cabeçalhos vindos do SharePoint
+    df.columns = df.columns.astype(str).str.strip()
+
+    # 2. Função de busca flexível (ignora maiúsculas/minúsculas, espaços e underlines)
+    def buscar_coluna_flexivel(df_input, candidatas):
+        cols_norm = {c.lower().replace("_", "").replace(" ", ""): c for c in df_input.columns}
+        for cand in candidatas:
+            cand_norm = cand.lower().replace("_", "").replace(" ", "")
+            if cand_norm in cols_norm:
+                return cols_norm[cand_norm]
+        return None
+
+    # 3. Mapeamento com busca flexível de variações
+    mapeamento_flexivel = {
+        'num_doc': ['ID', 'Num_Doc', 'NUM_DOC'],
+        'processo_sei': ['PROCESSO', 'Processo', 'PROCESSO_SEI'],
+        'siema': ['SIEMA', 'Siema'],
+        'situacao': ['SITUACAO', 'Situacao', 'Situação'],
+        'laudo_sei': ['LAUDO_SEI', 'Laudo_SEI', 'LAUDO', 'Laudo'],
+        'data_acid': ['DATA_ACIDENTE', 'Data_Acidente', 'Data_Acid', 'DATA'],
+        'relat_sei': ['RAIPO_SEI', 'Raipo_SEI', 'RAIPO', 'RELAT_SEI'],
+        'instalacao': ['INSTALACAO', 'Instalacao', 'Instalação'],
+        'campo': ['Campo', 'CAMPO'],
+        'bacia': ['Bacia', 'BACIA'],
+        'empresa': ['EMPRESA', 'Empresa'],
+        'cnpj': ['CNPJ', 'Cnpj'],
+        'produto': ['PRODUTO', 'Produto'],
+        'class_ol': ['CLASS_OL', 'Class_OL', 'Class OL', 'CLASS OL'],
+        'class_risco': ['CLASS_RISCO', 'Class_Risco', 'Class Risco'],
+        'vol_char': ['VOL', 'Vol', 'VOLUME', 'Volume'],
+        'lat': ['Lat', 'LAT', 'Latitude'],
+        'lon': ['Lon', 'LON', 'Longitude'],
+        'grandeza': ['Grandeza', 'GRANDEZA'],
+        'auto': ['AUTO_INFRACAO', 'Auto_Infracao', 'AUTO'],
+        'multa_char': ['MULTA_APLICADA', 'Multa_Aplicada', 'MULTA'],
+        'data_ai': ['Data_AI', 'DATA_AI'],
+        'multa_prevista': ['MULTA_PREVISTA', 'Multa_Prevista', 'MULTA PREVISTA'],
+        'fiscal': ['Fiscal', 'FISCAL', 'Fiscal Responsavel'],
+        'nivel': ['Nivel', 'NIVEL'],
+        'nivel_pontos': ['Nivel_Pontos', 'NIVEL_PONTOS'],
+        'lat_auto': ['Lat_Auto', 'LAT_AUTO'],
+        'lon_auto': ['Lon_Auto', 'LON_AUTO'],
+        'servidor_laudo': ['SERVIDOR_LAUDO', 'Servidor_Laudo', 'Servidor Laudo', 'SERVIDOR LAUDO', 'Servidor_laudo', 'ANALISTA_LAUDO', 'Analista', 'Servidor']
     }
-    
-    for col_real, col_interna in colunas_map.items():
-        if col_real in df.columns: df[col_interna] = df[col_real]
-        else: df[col_interna] = ""
+
+    for col_interna, candidatas in mapeamento_flexivel.items():
+        col_encontrada = buscar_coluna_flexivel(df, candidatas)
+        if col_encontrada:
+            df[col_interna] = df[col_encontrada]
+        else:
+            df[col_interna] = ""
 
     # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
-
 
     # =========================================================================
     # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
@@ -277,7 +312,7 @@ if df_original is not None and not df_original.empty:
         st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
         
         st.info("📌 Módulo de Coordenação em fase de estruturação. Em breve trará gráficos comparativos, taxas de conclusão por analista/fiscal e indicadores gerais.")
-    
+
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
     # =========================================================================
@@ -286,11 +321,34 @@ if df_original is not None and not df_original.empty:
         st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
         
         # Tratamento do Servidor de Laudo
-        df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+        df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({
+            "": "Não Atribuído", 
+            "nan": "Não Atribuído", 
+            "None": "Não Atribuído", 
+            "0": "Não Atribuído"
+        })
         
-        # --- MÉTRICAS DA ANÁLISE TÉCNICA ---
-        total_analise = len(df)
-        laudos_pendentes = len(df[df['laudo_sei'].astype(str).str.strip() == ""])
+        # --- FILTROS DE ANÁLISE TÉCNICA ---
+        with st.container(border=True):
+            st.markdown("**🔍 Painel de Filtros — Análise Técnica**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                op_situ = sorted(df['situacao'].astype(str).unique())
+                default_situ = ["Fazer Laudo"] if "Fazer Laudo" in op_situ else []
+                sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=default_situ)
+            with c2:
+                op_serv = sorted(df['s_laudo_limpo'].unique())
+                sel_serv = st.multiselect("SERVIDOR LAUDO:", ["Todos"] + op_serv, default=["Todos"])
+            with c3:
+                apenas_pendentes = st.checkbox("Mostrar apenas pendentes de Laudo SEI", value=False)
+
+        # --- MÉTRICAS DA ANÁLISE TÉCNICA (RESPONDEM APENAS AO FILTRO DE SERVIDOR LAUDO) ---
+        df_metricas_laudo = df.copy()
+        if sel_serv and "Todos" not in sel_serv:
+            df_metricas_laudo = df_metricas_laudo[df_metricas_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
+
+        total_analise = len(df_metricas_laudo)
+        laudos_pendentes = len(df_metricas_laudo[df_metricas_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])])
         laudos_concluidos = total_analise - laudos_pendentes
         
         m1, m2, m3 = st.columns(3)
@@ -302,29 +360,15 @@ if df_original is not None and not df_original.empty:
             st.metric(label="Laudos Elaborados", value=laudos_concluidos)
             
         st.write("---")
-        
-        # --- FILTROS DE ANÁLISE TÉCNICA ---
-        with st.container(border=True):
-            st.markdown("**🔍 Painel de Filtros — Análise Técnica**")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                op_situ = sorted(df['situacao'].astype(str).unique())
-                # Define "Fazer Laudo" como padrão se estiver presente nas opções
-                default_situ = ["Fazer Laudo"] if "Fazer Laudo" in op_situ else []
-                sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=default_situ)
-            with c2:
-                op_serv = sorted(df['s_laudo_limpo'].unique())
-                sel_serv = st.multiselect("SERVIDOR LAUDO:", ["Todos"] + op_serv, default=["Todos"])
-            with c3:
-                apenas_pendentes = st.checkbox("Mostrar apenas pendentes de Laudo SEI", value=False)
-                
+
+        # --- FILTRAGEM DA TABELA ---
         df_laudo = df.copy()
         if sel_situ: 
             df_laudo = df_laudo[df_laudo['situacao'].astype(str).isin(sel_situ)]
         if sel_serv and "Todos" not in sel_serv: 
             df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
         if apenas_pendentes: 
-            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip() == ""]
+            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
             
         df_laudo = df_laudo.reset_index(drop=True)
         
@@ -361,20 +405,6 @@ if df_original is not None and not df_original.empty:
         st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
         st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
 
-        # --- MÉTRICAS DA FISCALIZAÇÃO ---
-        total_fila = len(df)
-        aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
-        
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric(label="Processos no Fluxo", value=total_fila)
-        with m2:
-            st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
-        with m3:
-            st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
-        
-        st.write("---")
-        
         # --- FILTROS DE FISCALIZAÇÃO ---
         with st.container(border=True):
             st.markdown("**🔍 Painel de Filtros — Fiscalização**")
@@ -383,16 +413,50 @@ if df_original is not None and not df_original.empty:
                 op_situ = sorted(df['situacao'].astype(str).unique())
                 sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
             with c2:
-                df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+                df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
                 op_fisc = sorted(df['f_limpo'].unique())
                 sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
             with c3:
                 todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
 
+        # --- MÉTRICAS DA FISCALIZAÇÃO (RESPONDEM APENAS AO FILTRO DE FISCAL) ---
+        df_metricas_fisc = df.copy()
+        if sel_fisc and "Todos" not in sel_fisc:
+            df_metricas_fisc = df_metricas_fisc[df_metricas_fisc['f_limpo'].astype(str).isin(sel_fisc)]
+
+        total_fila = len(df_metricas_fisc)
+        situ_str = df_metricas_fisc['situacao'].astype(str).str.strip()
+        auto_str = df_metricas_fisc['auto'].astype(str).str.strip()
+
+        prontos_autuacao = len(df_metricas_fisc[situ_str.str.lower() == 'autuar'])
+        
+        # Auto lavrado: considerado quando a situação é 'Auto Lavrado' OU quando a coluna AUTO_INFRACAO está preenchida
+        is_auto_lavrado = (situ_str.str.lower() == 'auto lavrado') | (~auto_str.str.lower().isin(["", "nan", "none", "0", "processo não encontrado"]))
+        is_ai_gerado = situ_str.str.lower() == 'processo ai gerado'
+        
+        autos_lavrados = len(df_metricas_fisc[is_auto_lavrado])
+        fisc_pendentes = len(df_metricas_fisc[is_auto_lavrado & (~is_ai_gerado)])
+        fisc_gerados = len(df_metricas_fisc[is_ai_gerado])
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric(label="Processos no Fluxo", value=total_fila)
+        with m2:
+            st.metric(label="Prontos p/ Autuação", value=prontos_autuacao)
+        with m3:
+            st.metric(label="Autos Lavrados", value=autos_lavrados)
+        with m4:
+            st.metric(label="Proc. Fisc. Pendentes", value=fisc_pendentes)
+        with m5:
+            st.metric(label="Proc. AI Gerados", value=fisc_gerados)
+        
+        st.write("---")
+
+        # --- FILTRAGEM DA TABELA E DA GERAÇÃO ---
         df_f = df.copy()
         if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
         if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
-        if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
+        if not todos_laudos: df_f = df_f[~df_f['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
 
         df_f = df_f.reset_index(drop=True)
 
@@ -552,7 +616,7 @@ if df_original is not None and not df_original.empty:
                     st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
                     st.markdown(f"> *{texto_previa}*")
                     
-                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")    
+                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
