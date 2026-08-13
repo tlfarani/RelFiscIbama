@@ -315,10 +315,24 @@ if df_original is not None and not df_original.empty:
         df_equipe = df_equipe[~df_equipe['nome'].isin(["", "nan", "None"])].reset_index(drop=True)
 
     # --- IDENTIFICAÇÃO E AUTENTICAÇÃO ESTRITA DO USUÁRIO ---
-    email_usuario_logado = getattr(st, "user", None) and getattr(st.user, "email", None)
+    # Tenta capturar o e-mail autenticado nativamente pelo Streamlit Cloud OTP
+    email_usuario_logado = None
     
+    if hasattr(st, "user") and getattr(st.user, "email", None):
+        email_usuario_logado = st.user.email
+    elif hasattr(st, "experimental_user") and getattr(st.experimental_user, "email", None):
+        email_usuario_logado = st.experimental_user.email
+
+    # Se o e-mail não foi fornecido pelo Streamlit Cloud (ex: ambiente local de dev), exibe caixa de simulação
     if not email_usuario_logado:
-        email_usuario_logado = st.sidebar.text_input("👤 E-mail de Acesso:", value="", placeholder="seu.email@ibama.gov.br")
+        st.sidebar.warning("⚠️ Modo Local / Público")
+        email_usuario_logado = st.sidebar.text_input(
+            "👤 E-mail de Acesso (Simulação):", 
+            value="", 
+            placeholder="seu.email@ibama.gov.br"
+        )
+    else:
+        st.sidebar.success("🔒 Autenticado via Streamlit Cloud")
 
     perfil_usuario = "Não Cadastrado"
     nome_usuario = email_usuario_logado.strip() if email_usuario_logado and email_usuario_logado.strip() else "Usuário Não Autenticado"
