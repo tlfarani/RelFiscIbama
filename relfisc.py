@@ -261,7 +261,7 @@ if df_original is not None and not df_original.empty:
                 return cols_norm[cand_norm]
         return None
 
-    # 3. Lista de possíveis variações de nomes para cada coluna
+    # 3. Mapeamento com busca flexível de variações
     mapeamento_flexivel = {
         'num_doc': ['ID', 'Num_Doc', 'NUM_DOC'],
         'processo_sei': ['PROCESSO', 'Processo', 'PROCESSO_SEI'],
@@ -290,19 +290,8 @@ if df_original is not None and not df_original.empty:
         'nivel': ['Nivel', 'NIVEL'],
         'nivel_pontos': ['Nivel_Pontos', 'NIVEL_PONTOS'],
         'lat_auto': ['Lat_Auto', 'LAT_AUTO'],
-        {
-            'lon_auto': ['Lon_Auto', 'LON_AUTO'],
-            'servidor_laudo': [
-                'SERVIDOR_LAUDO',
-                'Servidor_Laudo',
-                'Servidor Laudo',
-                'SERVIDOR LAUDO',
-                'Servidor_laudo',
-                'ANALISTA_LAUDO',
-                'Analista',
-                'Servidor',
-            ],
-        },
+        'lon_auto': ['Lon_Auto', 'LON_AUTO'],
+        'servidor_laudo': ['SERVIDOR_LAUDO', 'Servidor_Laudo', 'Servidor Laudo', 'SERVIDOR LAUDO', 'Servidor_laudo', 'ANALISTA_LAUDO', 'Analista', 'Servidor']
     }
 
     for col_interna, candidatas in mapeamento_flexivel.items():
