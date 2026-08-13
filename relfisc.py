@@ -296,7 +296,9 @@ if df_original is not None and not df_original.empty:
             c1, c2, c3 = st.columns(3)
             with c1:
                 op_situ = sorted(df['situacao'].astype(str).unique())
-                sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=op_situ)
+                # Define "Fazer Laudo" como padrão se estiver presente nas opções
+                default_situ = ["Fazer Laudo"] if "Fazer Laudo" in op_situ else []
+                sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=default_situ)
             with c2:
                 op_serv = sorted(df['s_laudo_limpo'].unique())
                 sel_serv = st.multiselect("SERVIDOR LAUDO:", ["Todos"] + op_serv, default=["Todos"])
