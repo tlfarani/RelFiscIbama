@@ -308,87 +308,87 @@ if df_original is not None and not df_original.empty:
     # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
     # =========================================================================
     if pagina == "👑 Coordenação":
-    st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
-    st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
-    
-    import plotly.express as px
-
-    # --- 1. CARDS DE MÉTRICAS GLOBAIS ---
-    tot_ft = len(df)
-    pend_laudo = len(df[df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])])
-    
-    situ_s = df['situacao'].astype(str).str.strip().str.lower()
-    auto_s = df['auto'].astype(str).str.strip()
-    
-    is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
-    is_ai = situ_s == 'processo ai gerado'
-    
-    pend_auto = len(df[(~df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])) & (~is_auto)])
-    pend_proc_ai = len(df[is_auto & (~is_ai)])
-    concluidos = len(df[is_ai])
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Total de Processos FT", tot_ft)
-    c2.metric("Pendentes de Laudo", pend_laudo)
-    c3.metric("Pendentes de Auto", pend_auto)
-    c4.metric("Pendentes Proc. AI", pend_proc_ai)
-    c5.metric("Concluídos (AI Gerado)", concluidos)
-
-    st.write("---")
-
-    # --- 2. GRÁFICOS DE CARGA POR SERVIDOR ---
-    col_graf1, col_graf2 = st.columns(2)
-
-    with col_graf1:
-        st.subheader("🔬 Carga de Trabalho — Servidores de Laudo")
-        df_l = df.copy()
-        df_l['Status_Laudo'] = df_l['laudo_sei'].apply(lambda x: 'Concluído' if str(x).strip() not in ["", "nan", "None"] else 'Pendente')
-        df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
+        st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
+        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
         
-        fig_laudo = px.bar(
-            df_l_g, 
-            y='s_laudo_limpo', 
-            x='Quantidade', 
-            color='Status_Laudo',
-            orientation='h',
-            title="Processos por Servidor de Laudo",
-            color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#22C55E'}
-        )
-        fig_laudo.update_layout(yaxis_title="Servidor", xaxis_title="Qtd Processos", barmode='stack')
-        st.plotly_chart(fig_laudo, use_container_width=True)
-
-    with col_graf2:
-        st.subheader("⚖️ Carga de Trabalho — Fiscais")
-        df_fisc = df.copy()
-        df_fisc['Status_Fisc'] = df_fisc['situacao'].astype(str)
-        df_f_g = df_fisc.groupby(['f_limpo', 'Status_Fisc']).size().reset_index(name='Quantidade')
+        import plotly.express as px
+    
+        # --- 1. CARDS DE MÉTRICAS GLOBAIS ---
+        tot_ft = len(df)
+        pend_laudo = len(df[df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])])
         
-        fig_fisc = px.bar(
-            df_f_g, 
-            y='f_limpo', 
-            x='Quantidade', 
-            color='Status_Fisc',
-            orientation='h',
-            title="Processos por Fiscal Responsável"
+        situ_s = df['situacao'].astype(str).str.strip().str.lower()
+        auto_s = df['auto'].astype(str).str.strip()
+        
+        is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
+        is_ai = situ_s == 'processo ai gerado'
+        
+        pend_auto = len(df[(~df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])) & (~is_auto)])
+        pend_proc_ai = len(df[is_auto & (~is_ai)])
+        concluidos = len(df[is_ai])
+    
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total de Processos FT", tot_ft)
+        c2.metric("Pendentes de Laudo", pend_laudo)
+        c3.metric("Pendentes de Auto", pend_auto)
+        c4.metric("Pendentes Proc. AI", pend_proc_ai)
+        c5.metric("Concluídos (AI Gerado)", concluidos)
+    
+        st.write("---")
+    
+        # --- 2. GRÁFICOS DE CARGA POR SERVIDOR ---
+        col_graf1, col_graf2 = st.columns(2)
+    
+        with col_graf1:
+            st.subheader("🔬 Carga de Trabalho — Servidores de Laudo")
+            df_l = df.copy()
+            df_l['Status_Laudo'] = df_l['laudo_sei'].apply(lambda x: 'Concluído' if str(x).strip() not in ["", "nan", "None"] else 'Pendente')
+            df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
+            
+            fig_laudo = px.bar(
+                df_l_g, 
+                y='s_laudo_limpo', 
+                x='Quantidade', 
+                color='Status_Laudo',
+                orientation='h',
+                title="Processos por Servidor de Laudo",
+                color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#22C55E'}
+            )
+            fig_laudo.update_layout(yaxis_title="Servidor", xaxis_title="Qtd Processos", barmode='stack')
+            st.plotly_chart(fig_laudo, use_container_width=True)
+    
+        with col_graf2:
+            st.subheader("⚖️ Carga de Trabalho — Fiscais")
+            df_fisc = df.copy()
+            df_fisc['Status_Fisc'] = df_fisc['situacao'].astype(str)
+            df_f_g = df_fisc.groupby(['f_limpo', 'Status_Fisc']).size().reset_index(name='Quantidade')
+            
+            fig_fisc = px.bar(
+                df_f_g, 
+                y='f_limpo', 
+                x='Quantidade', 
+                color='Status_Fisc',
+                orientation='h',
+                title="Processos por Fiscal Responsável"
+            )
+            fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack')
+            st.plotly_chart(fig_fisc, use_container_width=True)
+    
+        st.write("---")
+    
+        # --- 3. DISTRIBUIÇÃO POR BACIA ---
+        st.subheader("🌊 Distribuição da Força-Tarefa por Bacia Sedimentar")
+        df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
+        fig_bacia = px.bar(
+            df_bacia, 
+            x='bacia', 
+            y='Quantidade', 
+            color='situacao',
+            title="Volume de Incidentes por Bacia Sedimentar",
+            barmode='group'
         )
-        fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack')
-        st.plotly_chart(fig_fisc, use_container_width=True)
-
-    st.write("---")
-
-    # --- 3. DISTRIBUIÇÃO POR BACIA ---
-    st.subheader("🌊 Distribuição da Força-Tarefa por Bacia Sedimentar")
-    df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
-    fig_bacia = px.bar(
-        df_bacia, 
-        x='bacia', 
-        y='Quantidade', 
-        color='situacao',
-        title="Volume de Incidentes por Bacia Sedimentar",
-        barmode='group'
-    )
-    fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title="Quantidade")
-    st.plotly_chart(fig_bacia, use_container_width=True)
+        fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title="Quantidade")
+        st.plotly_chart(fig_bacia, use_container_width=True)
 
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
