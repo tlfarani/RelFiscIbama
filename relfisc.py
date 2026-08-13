@@ -6,6 +6,7 @@ import io
 import os
 import requests
 import zipfile
+import random
 from datetime import datetime, timedelta
 import plotly.express as px
 
@@ -33,7 +34,7 @@ st.markdown("""
         border: 1px solid #4E5D30 !important;
     }
 
-    /* 3. Estilização Firme dos Botões (Incluindo Botões de Link) */
+    /* 3. Estilização Firme dos Botões */
     div.stButton > button:first-child, 
     div.stDownloadButton > button:first-child, 
     div.stLinkButton > a {
@@ -60,7 +61,7 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    /* 4. BLINDAGEM DOS FILTROS (Força fundo claro e remove o bloco escuro) */
+    /* 4. BLINDAGEM DOS FILTROS */
     div[data-baseweb="select"] > div {
         background-color: #FFFFFF !important;
         color: #000000 !important;
@@ -79,7 +80,6 @@ st.markdown("""
         color: #F2F2F2 !important;
         font-weight: bold !important;
     }
-    
     div[data-testid="stDataEditor"] tr:nth-child(even) td {
         background-color: #E9EDDE !important;
         color: #000000 !important;
@@ -90,24 +90,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-# --- BARRA LATERAL (NAVEGAÇÃO E ATALHOS) ---
-st.sidebar.title("📌 Navegação")
-pagina = st.sidebar.radio(
-    "Selecione o Módulo:",
-    ["👑 Coordenação", "🔬 Análise Técnica", "⚖️ Fiscalização"],
-    index=0
-)
-
-st.sidebar.markdown("---")
-st.sidebar.header("🔗 Atalhos Rápidos")
-
-st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
-
-if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
-    st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
-
-st.sidebar.markdown("---")
 
 # --- FUNÇÕES DE TRATAMENTO ---
 
@@ -228,33 +210,37 @@ def gerar_previa_texto(modelo, dicionario_dados):
         texto = texto.replace(chave, str(valor))
     return texto
 
-# --- CARREGAMENTO CENTRALIZADO DE DADOS (FLUXO UNIFICADO) ---
+# --- CARREGAMENTO CENTRALIZADO DE DADOS E EQUIPE ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
-        # Informa a ação "LER" de forma padronizada
         resposta = requests.post(url, headers=headers, json={"acao": "LER"})
         resposta.raise_for_status()
         dados_json = resposta.json()
-        if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
-        elif isinstance(dados_json, list): lista = dados_json
-        else: return None
-        return pd.DataFrame(lista)
+        
+        # Suporta tanto retorno único quanto chaveiro com tabela de equipe
+        if isinstance(dados_json, dict):
+            proc_list = dados_json.get("processos", dados_json.get("value", []))
+            equipe_list = dados_json.get("equipe", [])
+        elif isinstance(dados_json, list):
+            proc_list = dados_json
+            equipe_list = []
+        else:
+            return None, None
+            
+        return pd.DataFrame(proc_list), pd.DataFrame(equipe_list)
     except Exception as e:
         st.error(f"Erro ao carregar dados do SharePoint: {e}")
-        return None
+        return None, None
 
-df_original = carregar_dados_sharepoint()
+df_original, df_equipe_raw = carregar_dados_sharepoint()
 
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
-    
-    # 1. Limpa espaços invisíveis nos nomes dos cabeçalhos vindos do SharePoint
     df.columns = df.columns.astype(str).str.strip()
 
-    # 2. Função de busca flexível (ignora maiúsculas/minúsculas, espaços e underlines)
     def buscar_coluna_flexivel(df_input, candidatas):
         cols_norm = {c.lower().replace("_", "").replace(" ", ""): c for c in df_input.columns}
         for cand in candidatas:
@@ -263,7 +249,6 @@ if df_original is not None and not df_original.empty:
                 return cols_norm[cand_norm]
         return None
 
-    # 3. Mapeamento com busca flexível de variações
     mapeamento_flexivel = {
         'num_doc': ['ID', 'Num_Doc', 'NUM_DOC'],
         'processo_sei': ['PROCESSO', 'Processo', 'PROCESSO_SEI'],
@@ -298,26 +283,74 @@ if df_original is not None and not df_original.empty:
 
     for col_interna, candidatas in mapeamento_flexivel.items():
         col_encontrada = buscar_coluna_flexivel(df, candidatas)
-        if col_encontrada:
-            df[col_interna] = df[col_encontrada]
-        else:
-            df[col_interna] = ""
+        if col_encontrada: df[col_interna] = df[col_encontrada]
+        else: df[col_interna] = ""
 
-    # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
 
-    # Tratamentos padronizados para visualização
     df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
     df['f_limpo'] = df['fiscal'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
 
+    # --- IDENTIFICAÇÃO E AUTENTICAÇÃO DO USUÁRIO ---
+    # Tenta obter o e-mail do Streamlit Cloud; em desenvolvimento local, utiliza seletor/fallback
+    email_usuario_logado = getattr(st, "user", None) and getattr(st.user, "email", None)
+    
+    if not email_usuario_logado:
+        # Fallback para ambiente local/desenvolvimento
+        email_usuario_logado = st.sidebar.text_input("👤 E-mail de Acesso (Simulação):", value="tiago.farani@ibama.gov.br")
+
+    # Identificação do perfil do usuário logado baseado na aba Equipe
+    perfil_usuario = "Visitante"
+    nome_usuario = email_usuario_logado
+    
+    if df_equipe_raw is not None and not df_equipe_raw.empty:
+        df_equipe_raw.columns = df_equipe_raw.columns.astype(str).str.strip()
+        col_email = buscar_coluna_flexivel(df_equipe_raw, ['E_Mail', 'Email', 'E-mail'])
+        col_perfil = buscar_coluna_flexivel(df_equipe_raw, ['Perfil', 'PERFIL'])
+        col_nome = buscar_coluna_flexivel(df_equipe_raw, ['Nome', 'NOME'])
+        
+        if col_email and col_perfil:
+            match_u = df_equipe_raw[df_equipe_raw[col_email].astype(str).str.strip().str.lower() == email_usuario_logado.strip().lower()]
+            if not match_u.empty:
+                perfil_usuario = str(match_u.iloc[0][col_perfil]).strip()
+                if col_nome: nome_usuario = str(match_u.iloc[0][col_nome]).strip()
+    else:
+        # Se não houver tabela equipe carregada ainda, assume acesso liberado para coordenação
+        perfil_usuario = "Coordenação"
+
+    is_coordenador = perfil_usuario.lower() in ["coordenação", "coordenacao", "admin"]
+
+    # --- NAVEGAÇÃO CONDICIONAL ---
+    modulos_disponiveis = []
+    if is_coordenador: modulos_disponiveis.append("👑 Coordenação")
+    modulos_disponiveis.extend(["🔬 Análise Técnica", "⚖️ Fiscalização"])
+
+    st.sidebar.title("📌 Navegação")
+    st.sidebar.caption(f"👤 **{nome_usuario}** ({perfil_usuario})")
+    
+    pagina = st.sidebar.radio("Selecione o Módulo:", modulos_disponiveis, index=0)
+
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔗 Atalhos Rápidos")
+    st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
+
+    if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
+        st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
+
+    st.sidebar.markdown("---")
+
     # =========================================================================
-    # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
+    # 👑 PÁGINA 1: COORDENAÇÃO (EXCLUSIVA PARA PERFIL COORDENAÇÃO)
     # =========================================================================
     if pagina == "👑 Coordenação":
+        if not is_coordenador:
+            st.error("⛔ Acesso Restrito. O módulo de Coordenação é reservado exclusivamente para coordenadores cadastrados na equipe.")
+            st.stop()
+
         st.title("👑 Coordenação — Gestão da Esteira & Distribuição")
         st.caption("Painel de acompanhamento macro, distribuição de carga e gestão da força-tarefa")
 
-        tab_dash, tab_planilha = st.tabs(["📊 Dashboard", "📋 Planilha Geral & Atribuições"])
+        tab_dash, tab_planilha, tab_auto = st.tabs(["📊 Dashboard", "📋 Planilha Geral & Atribuições", "🎲 Atribuição Automática"])
 
         # --- ABA 1: DASHBOARD ---
         with tab_dash:
@@ -410,7 +443,6 @@ if df_original is not None and not df_original.empty:
         with tab_planilha:
             st.markdown("### 📋 Base Completa de Processos da Força-Tarefa")
 
-            # --- PAINEL DE FILTROS SUPERIORES ---
             with st.container(border=True):
                 st.markdown("**🔍 Filtros de Visualização**")
                 f_col1, f_col2, f_col3, f_col4 = st.columns(4)
@@ -428,20 +460,14 @@ if df_original is not None and not df_original.empty:
                     op_situ_c = ["Todas"] + sorted(df['situacao'].astype(str).unique())
                     sel_situ_c = st.selectbox("Situação:", op_situ_c, index=0)
 
-            # Aplicação dos Filtros
             df_coord = df.copy()
-            if sel_bacia_c != "Todas":
-                df_coord = df_coord[df_coord['bacia'].astype(str) == sel_bacia_c]
-            if sel_serv_c != "Todos":
-                df_coord = df_coord[df_coord['s_laudo_limpo'].astype(str) == sel_serv_c]
-            if sel_fisc_c != "Todos":
-                df_coord = df_coord[df_coord['f_limpo'].astype(str) == sel_fisc_c]
-            if sel_situ_c != "Todas":
-                df_coord = df_coord[df_coord['situacao'].astype(str) == sel_situ_c]
+            if sel_bacia_c != "Todas": df_coord = df_coord[df_coord['bacia'].astype(str) == sel_bacia_c]
+            if sel_serv_c != "Todos": df_coord = df_coord[df_coord['s_laudo_limpo'].astype(str) == sel_serv_c]
+            if sel_fisc_c != "Todos": df_coord = df_coord[df_coord['f_limpo'].astype(str) == sel_fisc_c]
+            if sel_situ_c != "Todas": df_coord = df_coord[df_coord['situacao'].astype(str) == sel_situ_c]
 
             df_coord = df_coord.reset_index(drop=True)
 
-            # --- PAINEL DE AÇÕES DE ATRIBUIÇÃO EM LOTE ---
             with st.container(border=True):
                 st.markdown("**⚡ Painel de Atribuição e Alteração em Lote**")
                 a_col1, a_col2, a_col3, a_col4 = st.columns(4)
@@ -457,13 +483,12 @@ if df_original is not None and not df_original.empty:
                 with a_col3:
                     nova_situacao = st.selectbox("Alterar Situação:", ["[ Não Alterar ]"] + lista_situacoes)
                 with a_col4:
-                    st.write("") # alinhamento vertical do botão
+                    st.write("")
                     st.write("")
                     btn_atualizar = st.button("🔄 Aplicar Alterações no SharePoint", use_container_width=True)
 
             marcar_coord = st.checkbox("✅ Marcar todos os processos visíveis abaixo", value=False)
 
-            # --- TABELA INTERATIVA COM CHECKBOXES ---
             df_coord_exib = pd.DataFrame({
                 "Selecionar": [marcar_coord] * len(df_coord),
                 "ID": df_coord['num_doc'].astype(str),
@@ -489,7 +514,6 @@ if df_original is not None and not df_original.empty:
                 key=f"editor_coord_{marcar_coord}"
             )
 
-            # --- PROCESSAMENTO DO DISPARO PARA O FLUXO UNIFICADO DO POWER AUTOMATE ---
             if btn_atualizar:
                 indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
                 
@@ -511,20 +535,139 @@ if df_original is not None and not df_original.empty:
                     }
 
                     url_planilha = st.secrets["sharepoint"]["url_planilha"]
-                    
                     try:
                         with st.spinner("Atualizando registros no SharePoint..."):
                             resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
                             resp.raise_for_status()
-                        
                         st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
-                        
-                        # Limpa o cache local e recarrega a página
                         st.cache_data.clear()
                         st.rerun()
-
                     except Exception as e:
                         st.error(f"Erro ao enviar atualização para o Power Automate: {e}")
+
+        # --- ABA 3: ATRIBUIÇÃO AUTOMÁTICA BALANCEADA ---
+        with tab_auto:
+            st.markdown("### 🎲 Sorteio e Distribuição Automática de Processos")
+            st.caption("Distribuição imparcial e balanceada por menor carga de trabalho com sorteio aleatório")
+
+            col_a1, col_a2 = st.columns(2)
+
+            with col_a1:
+                st.markdown("**1. Parâmetros da Demanda**")
+                tipo_tarefa = st.radio("Selecione a Tarefa a Distribuir:", ["Elaboração de Laudo (Análise Técnica)", "Lavratura de Auto (Fiscalização)"])
+                
+                bacias_disp = ["Todas as Bacias"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
+                bacia_alvo = st.selectbox("Filtrar Bacia Sedimentar:", bacias_disp)
+
+                # Filtra processos pendentes conforme a tarefa
+                if "Laudo" in tipo_tarefa:
+                    df_pend = df[df['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo']
+                else:
+                    df_pend = df[df['situacao'].astype(str).str.strip().str.lower() == 'autuar']
+
+                if bacia_alvo != "Todas as Bacias":
+                    df_pend = df_pend[df_pend['bacia'].astype(str) == bacia_alvo]
+
+                qtd_disponivel = len(df_pend)
+                st.info(f"📌 Processos pendentes encontrados para essa regra: **{qtd_disponivel}**")
+
+                qtd_distribuir = st.number_input("Quantidade de processos a atribuir nesta rodada:", min_value=1, max_value=max(1, qtd_disponivel), value=min(5, max(1, qtd_disponivel)))
+
+            with col_a2:
+                st.markdown("**2. Equipe Elegível (Servidores)**")
+                
+                # Obtém lista de servidores da aba Equipe ou da base
+                if "Laudo" in tipo_tarefa:
+                    servidores_base = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
+                else:
+                    servidores_base = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
+
+                servidores_selecionados = st.multiselect("Selecione os servidores que participarão do sorteio:", servidores_base, default=servidores_base)
+
+            st.write("---")
+
+            if st.button("🎲 Executar Simulação de Distribuição Balanceada", use_container_width=True):
+                if qtd_disponivel == 0:
+                    st.error("Não há processos pendentes disponíveis para os critérios selecionados.")
+                elif not servidores_selecionados:
+                    st.error("Selecione pelo menos um servidor elegível para receber atribuições.")
+                else:
+                    # Algoritmo de menor carga + sorteio aleatório em caso de empate
+                    df_alvo_dist = df_pend.head(qtd_distribuir).copy()
+                    
+                    # Calcula carga atual de cada servidor selecionado
+                    if "Laudo" in tipo_tarefa:
+                        cargas = {s: len(df[df['s_laudo_limpo'] == s]) for s in servidores_selecionados}
+                    else:
+                        cargas = {s: len(df[df['f_limpo'] == s]) for s in servidores_selecionados}
+
+                    atribuicoes_resultado = []
+
+                    for _, row in df_alvo_dist.iterrows():
+                        # Identifica a menor carga entre os elegíveis
+                        menor_c = min(cargas.values())
+                        candidatos_menor_carga = [s for s, c in cargas.items() if c == menor_c]
+                        
+                        # Sorteia aleatoriamente entre os de menor carga
+                        escolhido = random.choice(candidatos_menor_carga)
+                        
+                        # Incrementa a carga simulada do escolhido
+                        cargas[escolhido] += 1
+                        atribuicoes_resultado.append(escolhido)
+
+                    df_alvo_dist['Novo_Responsavel'] = atribuicoes_resultado
+
+                    st.session_state['resultado_distribuicao'] = {
+                        "df": df_alvo_dist,
+                        "tipo": tipo_tarefa
+                    }
+
+            # Se houver simulação realizada, exibe a tabela e o botão de confirmação
+            if 'resultado_distribuicao' in st.session_state:
+                res = st.session_state['resultado_distribuicao']
+                df_res = res['df']
+                tipo_t = res['tipo']
+
+                st.markdown("### 📋 Prévia da Distribuição Gerada")
+                
+                df_previa_exib = pd.DataFrame({
+                    "ID": df_res['num_doc'].astype(str),
+                    "Processo SEI": df_res['processo_sei'].astype(str),
+                    "Bacia": df_res['bacia'].astype(str),
+                    "Empresa": df_res['empresa'].astype(str),
+                    "Situação Atual": df_res['situacao'].astype(str),
+                    "Novo Responsável Sortead": df_res['Novo_Responsavel'].astype(str)
+                })
+
+                st.dataframe(df_previa_exib, hide_index=True, use_container_width=True)
+
+                if st.button("🚀 Confirmar e Gravar Atribuições Automáticas no SharePoint", use_container_width=True):
+                    processos_alvo = [str(p) for p in df_res['processo_sei'].tolist()]
+                    ids_alvo = [str(i) for i in df_res['num_doc'].tolist()]
+
+                    for idx, row_dist in df_res.iterrows():
+                        resp_sorteado = str(row_dist['Novo_Responsavel'])
+                        pid = str(row_dist['num_doc'])
+                        psei = str(row_dist['processo_sei'])
+
+                        payload_single = {
+                            "acao": "ATUALIZAR",
+                            "processos_sei": [psei],
+                            "ids": [pid],
+                            "novo_servidor_laudo": resp_sorteado if "Laudo" in tipo_t else "",
+                            "novo_fiscal": resp_sorteado if "Auto" in tipo_t else "",
+                            "nova_situacao": ""
+                        }
+
+                        url_planilha = st.secrets["sharepoint"]["url_planilha"]
+                        try:
+                            requests.post(url_planilha, json=payload_single, headers={"Content-Type": "application/json"})
+                        except: pass
+
+                    st.success(f"✅ Sucesso! {len(processos_alvo)} processos foram atribuídos e gravados no SharePoint!")
+                    del st.session_state['resultado_distribuicao']
+                    st.cache_data.clear()
+                    st.rerun()
 
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
@@ -533,7 +676,6 @@ if df_original is not None and not df_original.empty:
         st.title("🔬 Análise Técnica — Instrução de Laudos")
         st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
         
-        # --- FILTROS DE ANÁLISE TÉCNICA ---
         with st.container(border=True):
             st.markdown("**🔍 Painel de Filtros — Análise Técnica**")
             c1, c2, c3 = st.columns(3)
@@ -547,7 +689,6 @@ if df_original is not None and not df_original.empty:
             with c3:
                 apenas_pendentes = st.checkbox("Mostrar apenas pendentes de Laudo SEI", value=False)
 
-        # --- MÉTRICAS DA ANÁLISE TÉCNICA (RESPONDEM APENAS AO FILTRO DE SERVIDOR LAUDO) ---
         df_metricas_laudo = df.copy()
         if sel_serv and "Todos" not in sel_serv:
             df_metricas_laudo = df_metricas_laudo[df_metricas_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
@@ -557,29 +698,21 @@ if df_original is not None and not df_original.empty:
         laudos_concluidos = total_analise - laudos_pendentes
         
         m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric(label="Processos na Esteira", value=total_analise)
-        with m2:
-            st.metric(label="Pendentes de Laudo SEI", value=laudos_pendentes)
-        with m3:
-            st.metric(label="Laudos Elaborados", value=laudos_concluidos)
+        with m1: st.metric(label="Processos na Esteira", value=total_analise)
+        with m2: st.metric(label="Pendentes de Laudo SEI", value=laudos_pendentes)
+        with m3: st.metric(label="Laudos Elaborados", value=laudos_concluidos)
             
         st.write("---")
 
-        # --- FILTRAGEM DA TABELA ---
         df_laudo = df.copy()
-        if sel_situ: 
-            df_laudo = df_laudo[df_laudo['situacao'].astype(str).isin(sel_situ)]
-        if sel_serv and "Todos" not in sel_serv: 
-            df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
-        if apenas_pendentes: 
-            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
+        if sel_situ: df_laudo = df_laudo[df_laudo['situacao'].astype(str).isin(sel_situ)]
+        if sel_serv and "Todos" not in sel_serv: df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
+        if apenas_pendentes: df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
             
         df_laudo = df_laudo.reset_index(drop=True)
         
         st.markdown(f"### 📋 Processos em Análise Técnica ({len(df_laudo)} encontrados)")
         
-        # --- TABELA DE EXIBIÇÃO DE ANÁLISE TÉCNICA ---
         df_laudo_exib = pd.DataFrame({
             "ID": df_laudo['num_doc'].astype(str),
             "SITUAÇÃO": df_laudo['situacao'].astype(str),
@@ -596,11 +729,7 @@ if df_original is not None and not df_original.empty:
             "Fiscal Responsável": df_laudo['f_limpo'].astype(str)
         })
         
-        st.dataframe(
-            df_laudo_exib,
-            hide_index=True,
-            use_container_width=True
-        )
+        st.dataframe(df_laudo_exib, hide_index=True, use_container_width=True)
 
     # =========================================================================
     # ⚖️ PÁGINA 3: FISCALIZAÇÃO (AUTUAÇÃO & MINUTAS)
@@ -610,7 +739,6 @@ if df_original is not None and not df_original.empty:
         st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
         st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
 
-        # --- FILTROS DE FISCALIZAÇÃO ---
         with st.container(border=True):
             st.markdown("**🔍 Painel de Filtros — Fiscalização**")
             c1, c2, c3 = st.columns(3)
@@ -623,7 +751,6 @@ if df_original is not None and not df_original.empty:
             with c3:
                 todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
 
-        # --- MÉTRICAS DA FISCALIZAÇÃO (RESPONDEM APENAS AO FILTRO DE FISCAL) ---
         df_metricas_fisc = df.copy()
         if sel_fisc and "Todos" not in sel_fisc:
             df_metricas_fisc = df_metricas_fisc[df_metricas_fisc['f_limpo'].astype(str).isin(sel_fisc)]
@@ -633,7 +760,6 @@ if df_original is not None and not df_original.empty:
         auto_str = df_metricas_fisc['auto'].astype(str).str.strip()
 
         prontos_autuacao = len(df_metricas_fisc[situ_str.str.lower() == 'autuar'])
-        
         is_auto_lavrado = (situ_str.str.lower() == 'auto lavrado') | (~auto_str.str.lower().isin(["", "nan", "none", "0", "processo não encontrado"]))
         is_ai_gerado = situ_str.str.lower() == 'processo ai gerado'
         
@@ -642,20 +768,14 @@ if df_original is not None and not df_original.empty:
         fisc_gerados = len(df_metricas_fisc[is_ai_gerado])
 
         m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            st.metric(label="Processos no Fluxo", value=total_fila)
-        with m2:
-            st.metric(label="Prontos p/ Autuação", value=prontos_autuacao)
-        with m3:
-            st.metric(label="Autos Lavrados", value=autos_lavrados)
-        with m4:
-            st.metric(label="Proc. Fisc. Pendentes", value=fisc_pendentes)
-        with m5:
-            st.metric(label="Proc. AI Gerados", value=fisc_gerados)
+        with m1: st.metric(label="Processos no Fluxo", value=total_fila)
+        with m2: st.metric(label="Prontos p/ Autuação", value=prontos_autuacao)
+        with m3: st.metric(label="Autos Lavrados", value=autos_lavrados)
+        with m4: st.metric(label="Proc. Fisc. Pendentes", value=fisc_pendentes)
+        with m5: st.metric(label="Proc. AI Gerados", value=fisc_gerados)
         
         st.write("---")
 
-        # --- FILTRAGEM DA TABELA E DA GERAÇÃO ---
         df_f = df.copy()
         if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
         if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
@@ -663,13 +783,11 @@ if df_original is not None and not df_original.empty:
 
         df_f = df_f.reset_index(drop=True)
 
-        # --- CONTROLE DE SELEÇÃO EM MASSA ---
         st.markdown("### 📋 Processos para Análise")
         
         marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
         vetor_selecao_inicial = [marcar_todos] * len(df_f)
 
-        # --- PREPARAÇÃO DA BASE DE EXIBIÇÃO ---
         df_exib = pd.DataFrame({
             "Selecionar": vetor_selecao_inicial,
             "ID": df_f['num_doc'].astype(str),
@@ -690,9 +808,7 @@ if df_original is not None and not df_original.empty:
             hide_index=True,
             use_container_width=True,
             disabled=[col for col in df_exib.columns if col != "Selecionar"],
-            column_config={
-                "Selecionar": st.column_config.CheckboxColumn("Selecionar")
-            },
+            column_config={"Selecionar": st.column_config.CheckboxColumn("Selecionar")},
             key=f"editor_{marcar_todos}"
         )
         
@@ -703,7 +819,6 @@ if df_original is not None and not df_original.empty:
             st.write("---")
             st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
             
-            # --- LÓGICA DE COMPACTAÇÃO EM ZIP (EM MEMÓRIA) ---
             zip_buffer = io.BytesIO()
             arquivos_para_zipar = 0
             
@@ -750,7 +865,6 @@ if df_original is not None and not df_original.empty:
                     
                     doc_io = preencher_documento(caminho, dados)
                     nome_arquivo = f"Rel_Fisc_{row['num_doc']}.docx"
-                    
                     zip_file.writestr(nome_arquivo, doc_io.getvalue())
                     arquivos_para_zipar += 1
 
@@ -810,15 +924,12 @@ if df_original is not None and not df_original.empty:
                 
                 doc_io_unitario = preencher_documento(caminho, dados_unitarios)
                 nome = f"Rel_Fisc_{row['num_doc']}.docx"
-                
                 texto_previa = gerar_previa_texto(modelo, dados_unitarios)
                 
                 with st.container(border=True):
                     st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    
                     st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
                     st.markdown(f"> *{texto_previa}*")
-                    
                     st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 
 else:
