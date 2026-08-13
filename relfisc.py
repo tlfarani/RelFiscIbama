@@ -355,8 +355,10 @@ if df_original is not None and not df_original.empty:
                 x='Quantidade', 
                 color='Status_Laudo',
                 orientation='h',
+                text_auto=True,
                 color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#4E5D30'}
             )
+            fig_laudo.update_traces(textposition='auto')
             fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
             st.plotly_chart(fig_laudo, use_container_width=True)
 
@@ -370,8 +372,10 @@ if df_original is not None and not df_original.empty:
                 y='f_limpo', 
                 x='Quantidade', 
                 color='situacao',
-                orientation='h'
+                orientation='h',
+                text_auto=True
             )
+            fig_fisc.update_traces(textposition='auto')
             fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
             st.plotly_chart(fig_fisc, use_container_width=True)
 
@@ -385,9 +389,19 @@ if df_original is not None and not df_original.empty:
             x='bacia', 
             y='Quantidade', 
             color='situacao',
-            barmode='group'
+            barmode='group',
+            text_auto=True
         )
-        fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title="Quantidade de Processos", margin=dict(l=0, r=0, t=20, b=0))
+        fig_bacia.update_traces(textposition='outside')
+        fig_bacia.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=False, title=None)
+        fig_bacia.update_xaxes(showgrid=False)
+        fig_bacia.update_layout(
+            xaxis_title="Bacia Sedimentar", 
+            yaxis_title=None,
+            bargap=0.3,       # Espaçamento entre grupos de bacias
+            bargroupgap=0.15, # Espaçamento entre barras do mesmo grupo
+            margin=dict(l=0, r=0, t=20, b=0)
+        )
         st.plotly_chart(fig_bacia, use_container_width=True)
 
     # =========================================================================
