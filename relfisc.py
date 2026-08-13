@@ -304,7 +304,6 @@ if df_original is not None and not df_original.empty:
     # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
 
-
     # =========================================================================
     # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
     # =========================================================================
@@ -313,7 +312,7 @@ if df_original is not None and not df_original.empty:
         st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
         
         st.info("📌 Módulo de Coordenação em fase de estruturação. Em breve trará gráficos comparativos, taxas de conclusão por analista/fiscal e indicadores gerais.")
-    
+
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
     # =========================================================================
@@ -321,7 +320,7 @@ if df_original is not None and not df_original.empty:
         st.title("🔬 Análise Técnica — Instrução de Laudos")
         st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
         
-        # Tratamento do Servidor de Laudo com remoção de espaços em branco
+        # Tratamento do Servidor de Laudo
         df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({
             "": "Não Atribuído", 
             "nan": "Não Atribuído", 
@@ -329,28 +328,12 @@ if df_original is not None and not df_original.empty:
             "0": "Não Atribuído"
         })
         
-        # --- MÉTRICAS DA ANÁLISE TÉCNICA ---
-        total_analise = len(df)
-        laudos_pendentes = len(df[df['laudo_sei'].astype(str).str.strip() == ""])
-        laudos_concluidos = total_analise - laudos_pendentes
-        
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric(label="Processos na Esteira", value=total_analise)
-        with m2:
-            st.metric(label="Pendentes de Laudo SEI", value=laudos_pendentes)
-        with m3:
-            st.metric(label="Laudos Elaborados", value=laudos_concluidos)
-            
-        st.write("---")
-        
         # --- FILTROS DE ANÁLISE TÉCNICA ---
         with st.container(border=True):
             st.markdown("**🔍 Painel de Filtros — Análise Técnica**")
             c1, c2, c3 = st.columns(3)
             with c1:
                 op_situ = sorted(df['situacao'].astype(str).unique())
-                # Define "Fazer Laudo" como padrão se estiver presente nas opções
                 default_situ = ["Fazer Laudo"] if "Fazer Laudo" in op_situ else []
                 sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=default_situ)
             with c2:
@@ -365,9 +348,24 @@ if df_original is not None and not df_original.empty:
         if sel_serv and "Todos" not in sel_serv: 
             df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
         if apenas_pendentes: 
-            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip() == ""]
+            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
             
         df_laudo = df_laudo.reset_index(drop=True)
+
+        # --- MÉTRICAS DA ANÁLISE TÉCNICA (REATIVAS AOS FILTROS) ---
+        total_analise = len(df_laudo)
+        laudos_pendentes = len(df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])])
+        laudos_concluidos = total_analise - laudos_pendentes
+        
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric(label="Processos na Esteira", value=total_analise)
+        with m2:
+            st.metric(label="Pendentes de Laudo SEI", value=laudos_pendentes)
+        with m3:
+            st.metric(label="Laudos Elaborados", value=laudos_concluidos)
+            
+        st.write("---")
         
         st.markdown(f"### 📋 Processos em Análise Técnica ({len(df_laudo)} encontrados)")
         
@@ -402,20 +400,6 @@ if df_original is not None and not df_original.empty:
         st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
         st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
 
-        # --- MÉTRICAS DA FISCALIZAÇÃO ---
-        total_fila = len(df)
-        aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
-        
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric(label="Processos no Fluxo", value=total_fila)
-        with m2:
-            st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
-        with m3:
-            st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
-        
-        st.write("---")
-        
         # --- FILTROS DE FISCALIZAÇÃO ---
         with st.container(border=True):
             st.markdown("**🔍 Painel de Filtros — Fiscalização**")
@@ -424,7 +408,7 @@ if df_original is not None and not df_original.empty:
                 op_situ = sorted(df['situacao'].astype(str).unique())
                 sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
             with c2:
-                df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+                df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
                 op_fisc = sorted(df['f_limpo'].unique())
                 sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
             with c3:
@@ -433,9 +417,39 @@ if df_original is not None and not df_original.empty:
         df_f = df.copy()
         if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
         if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
-        if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
+        if not todos_laudos: df_f = df_f[~df_f['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
 
         df_f = df_f.reset_index(drop=True)
+
+        # --- MÉTRICAS DA FISCALIZAÇÃO (REATIVAS AOS FILTROS) ---
+        total_fila = len(df_f)
+        situ_str = df_f['situacao'].astype(str).str.strip()
+        auto_str = df_f['auto'].astype(str).str.strip()
+
+        prontos_autuacao = len(df_f[situ_str.str.lower() == 'autuar'])
+        autos_lavrados = len(df_f[situ_str.str.lower() == 'auto lavrado'])
+        
+        # Auto lavrado (por situação ou coluna 'auto' preenchida)
+        is_auto_lavrado = (situ_str.str.lower() == 'auto lavrado') | (~auto_str.str.lower().isin(["", "nan", "none", "0", "processo não encontrado"]))
+        is_ai_gerado = situ_str.str.lower() == 'processo ai gerado'
+        
+        # Pendente = Auto lavrado, mas situação ainda não é "Processo AI Gerado"
+        fisc_pendentes = len(df_f[is_auto_lavrado & (~is_ai_gerado)])
+        fisc_gerados = len(df_f[is_ai_gerado])
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric(label="Processos no Fluxo", value=total_fila)
+        with m2:
+            st.metric(label="Prontos p/ Autuação", value=prontos_autuacao)
+        with m3:
+            st.metric(label="Autos Lavrados", value=autos_lavrados)
+        with m4:
+            st.metric(label="Proc. Fisc. Pendentes", value=fisc_pendentes)
+        with m5:
+            st.metric(label="Proc. AI Gerados", value=fisc_gerados)
+        
+        st.write("---")
 
         # --- CONTROLE DE SELEÇÃO EM MASSA ---
         st.markdown("### 📋 Processos para Análise")
@@ -528,72 +542,72 @@ if df_original is not None and not df_original.empty:
                     zip_file.writestr(nome_arquivo, doc_io.getvalue())
                     arquivos_para_zipar += 1
 
-            zip_buffer.seek(0)
+        zip_buffer.seek(0)
+        
+        if arquivos_para_zipar > 1:
+            st.markdown("### 📦 Download Unificado")
+            st.download_button(
+                label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
+                data=zip_buffer,
+                file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+            st.write("---")
+
+        st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
+        for _, row in selecionados.iterrows():
+            modelo, risco = extrair_classe_e_modelo(row)
+            if not modelo: continue
             
-            if arquivos_para_zipar > 1:
-                st.markdown("### 📦 Download Unificado")
-                st.download_button(
-                    label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
-                    data=zip_buffer,
-                    file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                    mime="application/zip",
-                    use_container_width=True
-                )
-                st.write("---")
+            caminho = os.path.join("modelos", modelo)
+            if not os.path.exists(caminho): continue
 
-            st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
-            for _, row in selecionados.iterrows():
-                modelo, risco = extrair_classe_e_modelo(row)
-                if not modelo: continue
-                
-                caminho = os.path.join("modelos", modelo)
-                if not os.path.exists(caminho): continue
+            grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
+            nivel_texto = processar_nivel(row.get('nivel', ''))
 
-                grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
-                nivel_texto = processar_nivel(row.get('nivel', ''))
-
-                dados_unitarios = {
-                    "<<siema>>": t_tag(row.get('siema', ''), "siema"),
-                    "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
-                    "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
-                    "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
-                    "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                    "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
-                    "<<campo>>": t_tag(row.get('campo', ''), "campo"),
-                    "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
-                    "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                    "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
-                    "<<produto>>": t_tag(row.get('produto', ''), "produto"),
-                    "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
-                    "<<class_risco>>": risco,
-                    "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                    "<<lat>>": t_tag(row.get('lat', ''), "lat"),
-                    "<<lon>>": t_tag(row.get('lon', ''), "lon"),
-                    "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
-                    "<<grandeza_texto>>": grandeza_texto,
-                    "<<grandeza_pontos>>": grandeza_pontos,
-                    "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
-                    "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
-                    "<<nivel_texto>>": nivel_texto,
-                    "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
-                    "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
-                    "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
-                    "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
-                    "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
-                }
+            dados_unitarios = {
+                "<<siema>>": t_tag(row.get('siema', ''), "siema"),
+                "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
+                "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
+                "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
+                "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
+                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                "<<campo>>": t_tag(row.get('campo', ''), "campo"),
+                "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
+                "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
+                "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                "<<produto>>": t_tag(row.get('produto', ''), "produto"),
+                "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
+                "<<class_risco>>": risco,
+                "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
+                "<<lat>>": t_tag(row.get('lat', ''), "lat"),
+                "<<lon>>": t_tag(row.get('lon', ''), "lon"),
+                "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
+                "<<grandeza_texto>>": grandeza_texto,
+                "<<grandeza_pontos>>": grandeza_pontos,
+                "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
+                "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
+                "<<nivel_texto>>": nivel_texto,
+                "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
+                "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
+                "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
+            }
+            
+            doc_io_unitario = preencher_documento(caminho, dados_unitarios)
+            nome = f"Rel_Fisc_{row['num_doc']}.docx"
+            
+            texto_previa = gerar_previa_texto(modelo, dados_unitarios)
+            
+            with st.container(border=True):
+                st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
                 
-                doc_io_unitario = preencher_documento(caminho, dados_unitarios)
-                nome = f"Rel_Fisc_{row['num_doc']}.docx"
+                st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
+                st.markdown(f"> *{texto_previa}*")
                 
-                texto_previa = gerar_previa_texto(modelo, dados_unitarios)
-                
-                with st.container(border=True):
-                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                    
-                    st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
-                    st.markdown(f"> *{texto_previa}*")
-                    
-                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")    
+                st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
