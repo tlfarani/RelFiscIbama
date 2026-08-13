@@ -234,7 +234,7 @@ def carregar_dados_sharepoint():
     try:
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
-        # Informa explicitamente a ação "LER" ao Power Automate
+        # Informa a ação "LER" de forma padronizada
         resposta = requests.post(url, headers=headers, json={"acao": "LER"})
         resposta.raise_for_status()
         dados_json = resposta.json()
@@ -498,16 +498,16 @@ if df_original is not None and not df_original.empty:
                 elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]" and nova_situacao == "[ Não Alterar ]":
                     st.info("💡 Escolha ao menos uma alteração (Servidor, Fiscal ou Situação) nos menus acima.")
                 else:
-                    processos_alvo = df_coord.iloc[indices_marcados]['processo_sei'].tolist()
-                    ids_alvo = df_coord.iloc[indices_marcados]['num_doc'].tolist()
+                    processos_alvo = [str(p) for p in df_coord.iloc[indices_marcados]['processo_sei'].tolist()]
+                    ids_alvo = [str(i) for i in df_coord.iloc[indices_marcados]['num_doc'].tolist()]
 
                     payload_atualizacao = {
                         "acao": "ATUALIZAR",
                         "processos_sei": processos_alvo,
                         "ids": ids_alvo,
-                        "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else None,
-                        "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else None,
-                        "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else None
+                        "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else "",
+                        "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else "",
+                        "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else ""
                     }
 
                     url_planilha = st.secrets["sharepoint"]["url_planilha"]
@@ -519,7 +519,7 @@ if df_original is not None and not df_original.empty:
                         
                         st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
                         
-                        # Limpa o cache e recarrega os dados imediatamente
+                        # Limpa o cache local e recarrega a página
                         st.cache_data.clear()
                         st.rerun()
 
