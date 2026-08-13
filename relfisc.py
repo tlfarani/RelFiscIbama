@@ -249,21 +249,68 @@ df_original = carregar_dados_sharepoint()
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     
-    colunas_map = {
-        'ID': 'num_doc', 'PROCESSO': 'processo_sei', 'SIEMA': 'siema', 'SITUACAO': 'situacao',
-        'LAUDO_SEI': 'laudo_sei', 'DATA_ACIDENTE': 'data_acid', 'RAIPO_SEI': 'relat_sei',
-        'INSTALACAO': 'instalacao', 'Campo': 'campo', 'Bacia': 'bacia', 'EMPRESA': 'empresa',
-        'CNPJ': 'cnpj', 'PRODUTO': 'produto', 'CLASS_OL': 'class_ol', 'CLASS_RISCO': 'class_risco',
-        'VOL': 'vol_char', 'Lat': 'lat', 'Lon': 'lon', 'Grandeza': 'grandeza',
-        'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
-        'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos',
-        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto',
-        'SERVIDOR_LAUDO': 'servidor_laudo', 'Servidor_Laudo': 'servidor_laudo'
+    # 1. Limpa espaços invisíveis nos nomes dos cabeçalhos vindos do SharePoint
+    df.columns = df.columns.astype(str).str.strip()
+
+    # 2. Função de busca flexível (ignora maiúsculas/minúsculas, espaços e underlines)
+    def buscar_coluna_flexivel(df_input, candidatas):
+        cols_norm = {c.lower().replace("_", "").replace(" ", ""): c for c in df_input.columns}
+        for cand in candidatas:
+            cand_norm = cand.lower().replace("_", "").replace(" ", "")
+            if cand_norm in cols_norm:
+                return cols_norm[cand_norm]
+        return None
+
+    # 3. Lista de possíveis variações de nomes para cada coluna
+    mapeamento_flexivel = {
+        'num_doc': ['ID', 'Num_Doc', 'NUM_DOC'],
+        'processo_sei': ['PROCESSO', 'Processo', 'PROCESSO_SEI'],
+        'siema': ['SIEMA', 'Siema'],
+        'situacao': ['SITUACAO', 'Situacao', 'Situação'],
+        'laudo_sei': ['LAUDO_SEI', 'Laudo_SEI', 'LAUDO', 'Laudo'],
+        'data_acid': ['DATA_ACIDENTE', 'Data_Acidente', 'Data_Acid', 'DATA'],
+        'relat_sei': ['RAIPO_SEI', 'Raipo_SEI', 'RAIPO', 'RELAT_SEI'],
+        'instalacao': ['INSTALACAO', 'Instalacao', 'Instalação'],
+        'campo': ['Campo', 'CAMPO'],
+        'bacia': ['Bacia', 'BACIA'],
+        'empresa': ['EMPRESA', 'Empresa'],
+        'cnpj': ['CNPJ', 'Cnpj'],
+        'produto': ['PRODUTO', 'Produto'],
+        'class_ol': ['CLASS_OL', 'Class_OL', 'Class OL', 'CLASS OL'],
+        'class_risco': ['CLASS_RISCO', 'Class_Risco', 'Class Risco'],
+        'vol_char': ['VOL', 'Vol', 'VOLUME', 'Volume'],
+        'lat': ['Lat', 'LAT', 'Latitude'],
+        'lon': ['Lon', 'LON', 'Longitude'],
+        'grandeza': ['Grandeza', 'GRANDEZA'],
+        'auto': ['AUTO_INFRACAO', 'Auto_Infracao', 'AUTO'],
+        'multa_char': ['MULTA_APLICADA', 'Multa_Aplicada', 'MULTA'],
+        'data_ai': ['Data_AI', 'DATA_AI'],
+        'multa_prevista': ['MULTA_PREVISTA', 'Multa_Prevista', 'MULTA PREVISTA'],
+        'fiscal': ['Fiscal', 'FISCAL', 'Fiscal Responsavel'],
+        'nivel': ['Nivel', 'NIVEL'],
+        'nivel_pontos': ['Nivel_Pontos', 'NIVEL_PONTOS'],
+        'lat_auto': ['Lat_Auto', 'LAT_AUTO'],
+        {
+            'lon_auto': ['Lon_Auto', 'LON_AUTO'],
+            'servidor_laudo': [
+                'SERVIDOR_LAUDO',
+                'Servidor_Laudo',
+                'Servidor Laudo',
+                'SERVIDOR LAUDO',
+                'Servidor_laudo',
+                'ANALISTA_LAUDO',
+                'Analista',
+                'Servidor',
+            ],
+        },
     }
-    
-    for col_real, col_interna in colunas_map.items():
-        if col_real in df.columns: df[col_interna] = df[col_real]
-        else: df[col_interna] = ""
+
+    for col_interna, candidatas in mapeamento_flexivel.items():
+        col_encontrada = buscar_coluna_flexivel(df, candidatas)
+        if col_encontrada:
+            df[col_interna] = df[col_encontrada]
+        else:
+            df[col_interna] = ""
 
     # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
@@ -285,8 +332,13 @@ if df_original is not None and not df_original.empty:
         st.title("🔬 Análise Técnica — Instrução de Laudos")
         st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
         
-        # Tratamento do Servidor de Laudo
-        df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+        # Tratamento do Servidor de Laudo com remoção de espaços em branco
+        df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({
+            "": "Não Atribuído", 
+            "nan": "Não Atribuído", 
+            "None": "Não Atribuído", 
+            "0": "Não Atribuído"
+        })
         
         # --- MÉTRICAS DA ANÁLISE TÉCNICA ---
         total_analise = len(df)
