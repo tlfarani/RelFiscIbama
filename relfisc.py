@@ -315,41 +315,47 @@ if df_original is not None and not df_original.empty:
         df_equipe = df_equipe[~df_equipe['nome'].isin(["", "nan", "None"])].reset_index(drop=True)
 
     # --- IDENTIFICAÇÃO E AUTENTICAÇÃO ESTRITA DO USUÁRIO ---
-    # Tenta capturar o e-mail autenticado nativamente pelo Streamlit Cloud OTP
-    email_usuario_logado = None
-    
-    if hasattr(st, "user") and getattr(st.user, "email", None):
-        email_usuario_logado = st.user.email
-    elif hasattr(st, "experimental_user") and getattr(st.experimental_user, "email", None):
-        email_usuario_logado = st.experimental_user.email
+    email_detectado = None
 
-    # Se o e-mail não foi fornecido pelo Streamlit Cloud (ex: ambiente local de dev), exibe caixa de simulação
-    if not email_usuario_logado:
-        st.sidebar.warning("⚠️ Modo Local / Público")
+    # Tenta capturar o e-mail do usuário em todas as APIs possíveis do Streamlit Cloud
+    try:
+        if hasattr(st, "user") and st.user and getattr(st.user, "email", None):
+            email_detectado = st.user.email
+        elif hasattr(st, "experimental_user") and st.experimental_user and getattr(st.experimental_user, "email", None):
+            email_detectado = st.experimental_user.email
+        elif hasattr(st, "experimental_user") and st.experimental_user and hasattr(st.experimental_user, "get"):
+            email_detectado = st.experimental_user.get("email")
+    except Exception:
+        email_detectado = None
+
+    # Se o Streamlit Cloud forneceu o e-mail autenticado, oculta o campo de texto
+    if email_detectado and str(email_detectado).strip() not in ["", "None", "nan"]:
+        email_usuario_logado = str(email_detectado).strip()
+        st.sidebar.success(f"🔒 Autenticado via Cloud:\n\n`{email_usuario_logado}`")
+    else:
+        # Fallback apenas se o app rodar localmente ou sem autenticação injetada
+        st.sidebar.warning("⚠️ E-mail não detectado automaticamente")
         email_usuario_logado = st.sidebar.text_input(
-            "👤 E-mail de Acesso (Simulação):", 
+            "👤 Digite seu E-mail de Acesso:", 
             value="", 
             placeholder="seu.email@ibama.gov.br"
-        )
-    else:
-        st.sidebar.success("🔒 Autenticado via Streamlit Cloud")
+        ).strip()
 
-    perfil_usuario = "Não Cadastrado"
-    nome_usuario = email_usuario_logado.strip() if email_usuario_logado and email_usuario_logado.strip() else "Usuário Não Autenticado"
+    perfil_usuario = "Não Cadastrado na Equipe"
+    nome_usuario = email_usuario_logado if email_usuario_logado else "Usuário Não Identificado"
     
-    # Validação rigorosa contra a aba Equipe
-    if not df_equipe.empty and email_usuario_logado and email_usuario_logado.strip():
-        match_u = df_equipe[df_equipe['email'].str.lower() == email_usuario_logado.strip().lower()]
+    # Validação rigorosa contra a aba Equipe da planilha
+    if not df_equipe.empty and email_usuario_logado:
+        match_u = df_equipe[df_equipe['email'].str.lower() == email_usuario_logado.lower()]
         if not match_u.empty:
             perfil_usuario = str(match_u.iloc[0]['perfil']).strip()
             nome_usuario = str(match_u.iloc[0]['nome']).strip()
         else:
             perfil_usuario = "Não Cadastrado na Equipe"
-    else:
-        if df_equipe.empty:
-            perfil_usuario = "Aba Equipe Não Configurada"
+    elif df_equipe.empty:
+        perfil_usuario = "Aba Equipe Não Encontrada no SharePoint"
 
-    # Validação estrita: apenas o perfil 'Coordenação' ou 'Admin' acessa a tela de Coordenação
+    # Permissão estrita: Apenas perfil "Coordenação" ou "Admin" aciona o módulo de Coordenação
     is_coordenador = perfil_usuario.lower() in ["coordenação", "coordenacao", "admin"]
 
     # --- NAVEGAÇÃO CONDICIONAL ---
