@@ -395,7 +395,10 @@ if df_original is not None and not df_original.empty:
             with col_g1:
                 st.markdown("### 🔬 Carga por Servidor de Laudo")
                 df_l = df.copy()
-                df_l['Status_Laudo'] = df_l['laudo_sei'].apply(lambda x: 'Concluído' if str(x).strip() not in ["", "nan", "None"] else 'Pendente')
+                # Carga pendente real = situação 'Fazer Laudo' e sem número de Laudo SEI
+                df_l['is_pendente'] = (df_l['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
+                                      (df_l['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
+                df_l['Status_Laudo'] = df_l['is_pendente'].apply(lambda x: 'Pendente (Fazer Laudo)' if x else 'Concluído')
                 df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
                 
                 fig_laudo = px.bar(
@@ -405,7 +408,7 @@ if df_original is not None and not df_original.empty:
                     color='Status_Laudo',
                     orientation='h',
                     text_auto=True,
-                    color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#4E5D30'}
+                    color_discrete_map={'Pendente (Fazer Laudo)': '#EAB308', 'Concluído': '#4E5D30'}
                 )
                 fig_laudo.update_traces(textposition='auto')
                 fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
@@ -485,7 +488,6 @@ if df_original is not None and not df_original.empty:
                 st.markdown("**⚡ Painel de Atribuição e Alteração em Lote**")
                 a_col1, a_col2, a_col3, a_col4 = st.columns(4)
                 
-                # Obtém servidores cadastrados na Equipe + existentes na base
                 if not df_equipe.empty:
                     lista_servidores = sorted(list(set(df_equipe['nome'].tolist() + [s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])))
                     lista_fiscais = sorted(list(set(df_equipe['nome'].tolist() + [f for f in df['f_limpo'].unique() if f != "Não Atribuído"])))
@@ -567,7 +569,7 @@ if df_original is not None and not df_original.empty:
         # --- ABA 3: ATRIBUIÇÃO AUTOMÁTICA BALANCEADA ---
         with tab_auto:
             st.markdown("### 🎲 Sorteio e Distribuição Automática de Processos")
-            st.caption("Distribuição imparcial e balanceada por menor carga de trabalho com sorteio aleatório")
+            st.caption("Distribuição imparcial e balanceada considerando a carga ativa em aberto de cada servidor")
 
             col_a1, col_a2 = st.columns(2)
 
@@ -594,7 +596,6 @@ if df_original is not None and not df_original.empty:
             with col_a2:
                 st.markdown("**2. Equipe Elegível (Servidores Cadastrados)**")
                 
-                # Busca servidores cadastrados na Tabela Equipe filtrando por perfil
                 if not df_equipe.empty:
                     if "Laudo" in tipo_tarefa:
                         mask_laudo = df_equipe['perfil'].str.lower().str.contains("análise|tecnica|laudo|coord", na=False)
@@ -624,10 +625,21 @@ if df_original is not None and not df_original.empty:
                 else:
                     df_alvo_dist = df_pend.head(qtd_distribuir).copy()
                     
+                    # Carga ativa atual real (processos em 'Fazer Laudo' sem laudo_sei para laudos / 'Autuar' sem auto para fiscais)
                     if "Laudo" in tipo_tarefa:
-                        cargas = {s: len(df[df['s_laudo_limpo'] == s]) for s in servidores_selecionados}
+                        cargas = {}
+                        for s in servidores_selecionados:
+                            mask_s = (df['s_laudo_limpo'] == s) & \
+                                     (df['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
+                                     (df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
+                            cargas[s] = len(df[mask_s])
                     else:
-                        cargas = {s: len(df[df['f_limpo'] == s]) for s in servidores_selecionados}
+                        cargas = {}
+                        for s in servidores_selecionados:
+                            mask_f = (df['f_limpo'] == s) & \
+                                     (df['situacao'].astype(str).str.strip().str.lower() == 'autuar') & \
+                                     (df['auto'].astype(str).str.strip().isin(["", "nan", "None", "0", "processo não encontrado"]))
+                            cargas[s] = len(df[mask_f])
 
                     atribuicoes_resultado = []
 
