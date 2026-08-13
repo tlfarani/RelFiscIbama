@@ -94,7 +94,7 @@ st.markdown("""
 st.sidebar.title("📌 Navegação")
 pagina = st.sidebar.radio(
     "Selecione o Módulo:",
-    ["🔬 Análise Técnica", "⚖️ Fiscalização", "👑 Coordenação"],
+    ["👑 Coordenação", "🔬 Análise Técnica", "⚖️ Fiscalização"],
     index=0
 )
 
@@ -268,10 +268,20 @@ if df_original is not None and not df_original.empty:
     # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
 
+
     # =========================================================================
-    # 🔬 PÁGINA 1: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
+    # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
     # =========================================================================
-    if pagina == "🔬 Análise Técnica":
+    if pagina == "👑 Coordenação":
+        st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
+        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
+        
+        st.info("📌 Módulo de Coordenação em fase de estruturação. Em breve trará gráficos comparativos, taxas de conclusão por analista/fiscal e indicadores gerais.")
+    
+    # =========================================================================
+    # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
+    # =========================================================================
+    elif pagina == "🔬 Análise Técnica":
         st.title("🔬 Análise Técnica — Instrução de Laudos")
         st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
         
@@ -344,7 +354,7 @@ if df_original is not None and not df_original.empty:
         )
 
     # =========================================================================
-    # ⚖️ PÁGINA 2: FISCALIZAÇÃO (AUTUAÇÃO & MINUTAS)
+    # ⚖️ PÁGINA 3: FISCALIZAÇÃO (AUTUAÇÃO & MINUTAS)
     # =========================================================================
     elif pagina == "⚖️ Fiscalização":
         st.title("🔄 FiscFlow — Módulo de Fiscalização")
@@ -542,16 +552,7 @@ if df_original is not None and not df_original.empty:
                     st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
                     st.markdown(f"> *{texto_previa}*")
                     
-                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
-
-    # =========================================================================
-    # 👑 PÁGINA 3: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
-    # =========================================================================
-    elif pagina == "👑 Coordenação":
-        st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
-        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
-        
-        st.info("📌 Módulo de Coordenação em fase de estruturação. Em breve trará gráficos comparativos, taxas de conclusão por analista/fiscal e indicadores gerais.")
+                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")    
 
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
