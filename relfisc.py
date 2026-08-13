@@ -427,11 +427,13 @@ if df_original is not None and not df_original.empty:
         auto_str = df_f['auto'].astype(str).str.strip()
 
         prontos_autuacao = len(df_f[situ_str.str.lower() == 'autuar'])
-        autos_lavrados = len(df_f[situ_str.str.lower() == 'auto lavrado'])
         
-        # Auto lavrado (por situação ou coluna 'auto' preenchida)
+        # Auto lavrado: considerado quando a situação é 'Auto Lavrado' OU quando a coluna AUTO_INFRACAO está preenchida
         is_auto_lavrado = (situ_str.str.lower() == 'auto lavrado') | (~auto_str.str.lower().isin(["", "nan", "none", "0", "processo não encontrado"]))
         is_ai_gerado = situ_str.str.lower() == 'processo ai gerado'
+        
+        # Métrica atualizada para contabilizar todos os autos lavrados, independente da situação atual do processo
+        autos_lavrados = len(df_f[is_auto_lavrado])
         
         # Pendente = Auto lavrado, mas situação ainda não é "Processo AI Gerado"
         fisc_pendentes = len(df_f[is_auto_lavrado & (~is_ai_gerado)])
