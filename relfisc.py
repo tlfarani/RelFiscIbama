@@ -341,20 +341,14 @@ if df_original is not None and not df_original.empty:
                 sel_serv = st.multiselect("SERVIDOR LAUDO:", ["Todos"] + op_serv, default=["Todos"])
             with c3:
                 apenas_pendentes = st.checkbox("Mostrar apenas pendentes de Laudo SEI", value=False)
-                
-        df_laudo = df.copy()
-        if sel_situ: 
-            df_laudo = df_laudo[df_laudo['situacao'].astype(str).isin(sel_situ)]
-        if sel_serv and "Todos" not in sel_serv: 
-            df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
-        if apenas_pendentes: 
-            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
-            
-        df_laudo = df_laudo.reset_index(drop=True)
 
-        # --- MÉTRICAS DA ANÁLISE TÉCNICA (REATIVAS AOS FILTROS) ---
-        total_analise = len(df_laudo)
-        laudos_pendentes = len(df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])])
+        # --- MÉTRICAS DA ANÁLISE TÉCNICA (RESPONDEM APENAS AO FILTRO DE SERVIDOR LAUDO) ---
+        df_metricas_laudo = df.copy()
+        if sel_serv and "Todos" not in sel_serv:
+            df_metricas_laudo = df_metricas_laudo[df_metricas_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
+
+        total_analise = len(df_metricas_laudo)
+        laudos_pendentes = len(df_metricas_laudo[df_metricas_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])])
         laudos_concluidos = total_analise - laudos_pendentes
         
         m1, m2, m3 = st.columns(3)
@@ -366,6 +360,17 @@ if df_original is not None and not df_original.empty:
             st.metric(label="Laudos Elaborados", value=laudos_concluidos)
             
         st.write("---")
+
+        # --- FILTRAGEM DA TABELA ---
+        df_laudo = df.copy()
+        if sel_situ: 
+            df_laudo = df_laudo[df_laudo['situacao'].astype(str).isin(sel_situ)]
+        if sel_serv and "Todos" not in sel_serv: 
+            df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
+        if apenas_pendentes: 
+            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
+            
+        df_laudo = df_laudo.reset_index(drop=True)
         
         st.markdown(f"### 📋 Processos em Análise Técnica ({len(df_laudo)} encontrados)")
         
@@ -414,30 +419,24 @@ if df_original is not None and not df_original.empty:
             with c3:
                 todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
 
-        df_f = df.copy()
-        if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
-        if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
-        if not todos_laudos: df_f = df_f[~df_f['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
+        # --- MÉTRICAS DA FISCALIZAÇÃO (RESPONDEM APENAS AO FILTRO DE FISCAL) ---
+        df_metricas_fisc = df.copy()
+        if sel_fisc and "Todos" not in sel_fisc:
+            df_metricas_fisc = df_metricas_fisc[df_metricas_fisc['f_limpo'].astype(str).isin(sel_fisc)]
 
-        df_f = df_f.reset_index(drop=True)
+        total_fila = len(df_metricas_fisc)
+        situ_str = df_metricas_fisc['situacao'].astype(str).str.strip()
+        auto_str = df_metricas_fisc['auto'].astype(str).str.strip()
 
-        # --- MÉTRICAS DA FISCALIZAÇÃO (REATIVAS AOS FILTROS) ---
-        total_fila = len(df_f)
-        situ_str = df_f['situacao'].astype(str).str.strip()
-        auto_str = df_f['auto'].astype(str).str.strip()
-
-        prontos_autuacao = len(df_f[situ_str.str.lower() == 'autuar'])
+        prontos_autuacao = len(df_metricas_fisc[situ_str.str.lower() == 'autuar'])
         
         # Auto lavrado: considerado quando a situação é 'Auto Lavrado' OU quando a coluna AUTO_INFRACAO está preenchida
         is_auto_lavrado = (situ_str.str.lower() == 'auto lavrado') | (~auto_str.str.lower().isin(["", "nan", "none", "0", "processo não encontrado"]))
         is_ai_gerado = situ_str.str.lower() == 'processo ai gerado'
         
-        # Métrica atualizada para contabilizar todos os autos lavrados, independente da situação atual do processo
-        autos_lavrados = len(df_f[is_auto_lavrado])
-        
-        # Pendente = Auto lavrado, mas situação ainda não é "Processo AI Gerado"
-        fisc_pendentes = len(df_f[is_auto_lavrado & (~is_ai_gerado)])
-        fisc_gerados = len(df_f[is_ai_gerado])
+        autos_lavrados = len(df_metricas_fisc[is_auto_lavrado])
+        fisc_pendentes = len(df_metricas_fisc[is_auto_lavrado & (~is_ai_gerado)])
+        fisc_gerados = len(df_metricas_fisc[is_ai_gerado])
 
         m1, m2, m3, m4, m5 = st.columns(5)
         with m1:
@@ -452,6 +451,14 @@ if df_original is not None and not df_original.empty:
             st.metric(label="Proc. AI Gerados", value=fisc_gerados)
         
         st.write("---")
+
+        # --- FILTRAGEM DA TABELA E DA GERAÇÃO ---
+        df_f = df.copy()
+        if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
+        if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
+        if not todos_laudos: df_f = df_f[~df_f['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
+
+        df_f = df_f.reset_index(drop=True)
 
         # --- CONTROLE DE SELEÇÃO EM MASSA ---
         st.markdown("### 📋 Processos para Análise")
