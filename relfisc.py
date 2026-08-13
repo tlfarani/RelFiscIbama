@@ -90,12 +90,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BARRA LATERAL (ATALHOS E SISTEMAS) ---
+# --- BARRA LATERAL (NAVEGAÇÃO E ATALHOS) ---
+st.sidebar.title("📌 Navegação")
+pagina = st.sidebar.radio(
+    "Selecione o Módulo:",
+    ["🔬 Análise Técnica", "⚖️ Fiscalização", "👑 Coordenação"],
+    index=0
+)
+
+st.sidebar.markdown("---")
 st.sidebar.header("🔗 Atalhos Rápidos")
 
 st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
 
-# Link direto de navegação para a Planilha do SharePoint
 if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
     st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
 
@@ -220,11 +227,7 @@ def gerar_previa_texto(modelo, dicionario_dados):
         texto = texto.replace(chave, str(valor))
     return texto
 
-# --- INTERFACE ---
-st.title("🔄 FiscFlow")
-st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
-st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
-
+# --- CARREGAMENTO CENTRALIZADO DE DADOS ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
@@ -232,13 +235,13 @@ def carregar_dados_sharepoint():
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={})
         resposta.raise_for_status()
-        dados_json = response_data = resposta.json()
+        dados_json = resposta.json()
         if isinstance(dados_json, dict) and "value" in dados_json: lista = dados_json["value"]
         elif isinstance(dados_json, list): lista = dados_json
         else: return None
         return pd.DataFrame(lista)
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+        st.error(f"Erro ao carregar dados do SharePoint: {e}")
         return None
 
 df_original = carregar_dados_sharepoint()
@@ -254,93 +257,235 @@ if df_original is not None and not df_original.empty:
         'VOL': 'vol_char', 'Lat': 'lat', 'Lon': 'lon', 'Grandeza': 'grandeza',
         'AUTO_INFRACAO': 'auto', 'MULTA_APLICADA': 'multa_char', 'Data_AI': 'data_ai',
         'MULTA_PREVISTA': 'multa_prevista', 'Fiscal': 'fiscal', 'Nivel': 'nivel', 'Nivel_Pontos': 'nivel_pontos',
-        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto'
+        'Lat_Auto': 'lat_auto', 'Lon_Auto': 'lon_auto',
+        'SERVIDOR_LAUDO': 'servidor_laudo', 'Servidor_Laudo': 'servidor_laudo'
     }
     
     for col_real, col_interna in colunas_map.items():
         if col_real in df.columns: df[col_interna] = df[col_real]
         else: df[col_interna] = ""
 
-    # --- MÉTRICAS DO FLOW ---
-    total_fila = len(df)
-    aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
-    
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric(label="Processos no Fluxo", value=total_fila)
-    with m2:
-        st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
-    with m3:
-        st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
-    
-    st.write("---")
-    
-    # --- FILTROS ---
-    with st.container(border=True):
-        st.markdown("**🔍 Painel de Filtros**")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            op_situ = sorted(df['situacao'].astype(str).unique())
-            sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
-        with c2:
-            df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
-            op_fisc = sorted(df['f_limpo'].unique())
-            sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
-        with c3:
-            todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
-
-    df_f = df.copy()
-    if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
-    if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
-    if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
-
-    df_f = df_f.reset_index(drop=True)
-
-    # --- CONTROLE DE SELEÇÃO EM MASSA ---
-    st.markdown("### 📋 Processos para Análise")
-    
-    marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
-    vetor_selecao_inicial = [marcar_todos] * len(df_f)
-
-    # --- PREPARAÇÃO DA BASE DE EXIBIÇÃO ---
-    df_exib = pd.DataFrame({
-        "Selecionar": vetor_selecao_inicial,
-        "ID": df_f['num_doc'].astype(str),
-        "SITUAÇÃO": df_f['situacao'].astype(str),
-        "Fiscal": df_f['f_limpo'].astype(str),
-        "Data": [converter_data_excel(d) for d in df_f['data_acid']],
-        "Produto": df_f['produto'].astype(str),
-        "Class OL": df_f['class_ol'].astype(str),
-        "Risco": df_f['class_risco'].astype(str),
-        "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
-        "Multa Prev": df_f['multa_prevista'].astype(str),
-        "Lat Auto": df_f['lat_auto'].astype(str),
-        "Lon Auto": df_f['lon_auto'].astype(str)
-    })
-
-    tabela_editada = st.data_editor(
-        df_exib,
-        hide_index=True,
-        use_container_width=True,
-        disabled=[col for col in df_exib.columns if col != "Selecionar"],
-        column_config={
-            "Selecionar": st.column_config.CheckboxColumn("Selecionar")
-        },
-        key=f"editor_{marcar_todos}"
-    )
-    
-    indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
-    selecionados = df_f.iloc[indices_selecionados]
-
-    if not selecionados.empty:
+    # =========================================================================
+    # 🔬 PÁGINA 1: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
+    # =========================================================================
+    if pagina == "🔬 Análise Técnica":
+        st.title("🔬 Análise Técnica — Instrução de Laudos")
+        st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
+        
+        # Tratamento do Servidor de Laudo
+        df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+        
+        # --- MÉTRICAS DA ANÁLISE TÉCNICA ---
+        total_analise = len(df)
+        laudos_pendentes = len(df[df['laudo_sei'].astype(str).str.strip() == ""])
+        laudos_concluidos = total_analise - laudos_pendentes
+        
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric(label="Processos na Esteira", value=total_analise)
+        with m2:
+            st.metric(label="Pendentes de Laudo SEI", value=laudos_pendentes)
+        with m3:
+            st.metric(label="Laudos Elaborados", value=laudos_concluidos)
+            
         st.write("---")
-        st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
         
-        # --- LÓGICA DE COMPACTAÇÃO EM ZIP (EM MEMÓRIA) ---
-        zip_buffer = io.BytesIO()
-        arquivos_para_zipar = 0
+        # --- FILTROS DE ANÁLISE TÉCNICA ---
+        with st.container(border=True):
+            st.markdown("**🔍 Painel de Filtros — Análise Técnica**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                op_situ = sorted(df['situacao'].astype(str).unique())
+                sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=op_situ)
+            with c2:
+                op_serv = sorted(df['s_laudo_limpo'].unique())
+                sel_serv = st.multiselect("SERVIDOR LAUDO:", ["Todos"] + op_serv, default=["Todos"])
+            with c3:
+                apenas_pendentes = st.checkbox("Mostrar apenas pendentes de Laudo SEI", value=False)
+                
+        df_laudo = df.copy()
+        if sel_situ: 
+            df_laudo = df_laudo[df_laudo['situacao'].astype(str).isin(sel_situ)]
+        if sel_serv and "Todos" not in sel_serv: 
+            df_laudo = df_laudo[df_laudo['s_laudo_limpo'].astype(str).isin(sel_serv)]
+        if apenas_pendentes: 
+            df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip() == ""]
+            
+        df_laudo = df_laudo.reset_index(drop=True)
         
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        st.markdown(f"### 📋 Processos em Análise Técnica ({len(df_laudo)} encontrados)")
+        
+        # --- TABELA DE EXIBIÇÃO DE ANÁLISE TÉCNICA ---
+        df_laudo_exib = pd.DataFrame({
+            "ID": df_laudo['num_doc'].astype(str),
+            "SITUAÇÃO": df_laudo['situacao'].astype(str),
+            "Servidor Laudo": df_laudo['s_laudo_limpo'].astype(str),
+            "Processo SEI": df_laudo['processo_sei'].astype(str),
+            "Laudo SEI": df_laudo['laudo_sei'].astype(str),
+            "Data Acidente": [converter_data_excel(d) for d in df_laudo['data_acid']],
+            "Empresa": df_laudo['empresa'].astype(str),
+            "Instalação": df_laudo['instalacao'].astype(str),
+            "Produto": df_laudo['produto'].astype(str),
+            "Vol (m³)": [extrair_volume_texto(v) for v in df_laudo['vol_char']],
+            "Class OL": df_laudo['class_ol'].astype(str),
+            "Risco": df_laudo['class_risco'].astype(str),
+            "Fiscal Responsável": df_laudo['fiscal'].astype(str)
+        })
+        
+        st.dataframe(
+            df_laudo_exib,
+            hide_index=True,
+            use_container_width=True
+        )
+
+    # =========================================================================
+    # ⚖️ PÁGINA 2: FISCALIZAÇÃO (AUTUAÇÃO & MINUTAS)
+    # =========================================================================
+    elif pagina == "⚖️ Fiscalização":
+        st.title("🔄 FiscFlow — Módulo de Fiscalização")
+        st.markdown("### ⚖️ Gestão de Fila e Automação de Relatórios — IBAMA")
+        st.caption("Sincronização ativa com o SharePoint | Geração de minutas em lote")
+
+        # --- MÉTRICAS DA FISCALIZAÇÃO ---
+        total_fila = len(df)
+        aguardando_autuacao = len(df[df['situacao'].astype(str).str.lower() == 'autuar'])
+        
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric(label="Processos no Fluxo", value=total_fila)
+        with m2:
+            st.metric(label="Prontos para Autuação", value=aguardando_autuacao)
+        with m3:
+            st.metric(label="Status do Sistema", value="Online", delta="SharePoint Conectado")
+        
+        st.write("---")
+        
+        # --- FILTROS DE FISCALIZAÇÃO ---
+        with st.container(border=True):
+            st.markdown("**🔍 Painel de Filtros — Fiscalização**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                op_situ = sorted(df['situacao'].astype(str).unique())
+                sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
+            with c2:
+                df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído"})
+                op_fisc = sorted(df['f_limpo'].unique())
+                sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
+            with c3:
+                todos_laudos = st.checkbox("Mostrar processos sem LAUDO_SEI", value=False)
+
+        df_f = df.copy()
+        if sel_situ: df_f = df_f[df_f['situacao'].astype(str).isin(sel_situ)]
+        if sel_fisc and "Todos" not in sel_fisc: df_f = df_f[df_f['f_limpo'].astype(str).isin(sel_fisc)]
+        if not todos_laudos: df_f = df_f[df_f['laudo_sei'].astype(str).str.strip() != ""]
+
+        df_f = df_f.reset_index(drop=True)
+
+        # --- CONTROLE DE SELEÇÃO EM MASSA ---
+        st.markdown("### 📋 Processos para Análise")
+        
+        marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
+        vetor_selecao_inicial = [marcar_todos] * len(df_f)
+
+        # --- PREPARAÇÃO DA BASE DE EXIBIÇÃO ---
+        df_exib = pd.DataFrame({
+            "Selecionar": vetor_selecao_inicial,
+            "ID": df_f['num_doc'].astype(str),
+            "SITUAÇÃO": df_f['situacao'].astype(str),
+            "Fiscal": df_f['f_limpo'].astype(str),
+            "Data": [converter_data_excel(d) for d in df_f['data_acid']],
+            "Produto": df_f['produto'].astype(str),
+            "Class OL": df_f['class_ol'].astype(str),
+            "Risco": df_f['class_risco'].astype(str),
+            "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
+            "Multa Prev": df_f['multa_prevista'].astype(str),
+            "Lat Auto": df_f['lat_auto'].astype(str),
+            "Lon Auto": df_f['lon_auto'].astype(str)
+        })
+
+        tabela_editada = st.data_editor(
+            df_exib,
+            hide_index=True,
+            use_container_width=True,
+            disabled=[col for col in df_exib.columns if col != "Selecionar"],
+            column_config={
+                "Selecionar": st.column_config.CheckboxColumn("Selecionar")
+            },
+            key=f"editor_{marcar_todos}"
+        )
+        
+        indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
+        selecionados = df_f.iloc[indices_selecionados]
+
+        if not selecionados.empty:
+            st.write("---")
+            st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
+            
+            # --- LÓGICA DE COMPACTAÇÃO EM ZIP (EM MEMÓRIA) ---
+            zip_buffer = io.BytesIO()
+            arquivos_para_zipar = 0
+            
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for _, row in selecionados.iterrows():
+                    modelo, risco = extrair_classe_e_modelo(row)
+                    if not modelo: continue
+                    
+                    caminho = os.path.join("modelos", modelo)
+                    if not os.path.exists(caminho): continue
+
+                    grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
+                    nivel_texto = processar_nivel(row.get('nivel', ''))
+
+                    dados = {
+                        "<<siema>>": t_tag(row.get('siema', ''), "siema"),
+                        "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
+                        "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
+                        "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
+                        "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
+                        "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
+                        "<<campo>>": t_tag(row.get('campo', ''), "campo"),
+                        "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
+                        "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
+                        "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
+                        "<<produto>>": t_tag(row.get('produto', ''), "produto"),
+                        "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
+                        "<<class_risco>>": risco,
+                        "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
+                        "<<lat>>": t_tag(row.get('lat', ''), "lat"),
+                        "<<lon>>": t_tag(row.get('lon', ''), "lon"),
+                        "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
+                        "<<grandeza_texto>>": grandeza_texto,
+                        "<<grandeza_pontos>>": grandeza_pontos,
+                        "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
+                        "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
+                        "<<nivel_texto>>": nivel_texto,
+                        "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                        "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
+                        "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
+                        "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
+                        "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
+                    }
+                    
+                    doc_io = preencher_documento(caminho, dados)
+                    nome_arquivo = f"Rel_Fisc_{row['num_doc']}.docx"
+                    
+                    zip_file.writestr(nome_arquivo, doc_io.getvalue())
+                    arquivos_para_zipar += 1
+
+            zip_buffer.seek(0)
+            
+            if arquivos_para_zipar > 1:
+                st.markdown("### 📦 Download Unificado")
+                st.download_button(
+                    label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
+                    data=zip_buffer,
+                    file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+                st.write("---")
+
+            st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
             for _, row in selecionados.iterrows():
                 modelo, risco = extrair_classe_e_modelo(row)
                 if not modelo: continue
@@ -351,7 +496,7 @@ if df_original is not None and not df_original.empty:
                 grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
                 nivel_texto = processar_nivel(row.get('nivel', ''))
 
-                dados = {
+                dados_unitarios = {
                     "<<siema>>": t_tag(row.get('siema', ''), "siema"),
                     "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
                     "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
@@ -381,77 +526,27 @@ if df_original is not None and not df_original.empty:
                     "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
                 }
                 
-                doc_io = preencher_documento(caminho, dados)
-                nome_arquivo = f"Rel_Fisc_{row['num_doc']}.docx"
+                doc_io_unitario = preencher_documento(caminho, dados_unitarios)
+                nome = f"Rel_Fisc_{row['num_doc']}.docx"
                 
-                zip_file.writestr(nome_arquivo, doc_io.getvalue())
-                arquivos_para_zipar += 1
+                texto_previa = gerar_previa_texto(modelo, dados_unitarios)
+                
+                with st.container(border=True):
+                    st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
+                    
+                    st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
+                    st.markdown(f"> *{texto_previa}*")
+                    
+                    st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 
-        zip_buffer.seek(0)
+    # =========================================================================
+    # 👑 PÁGINA 3: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
+    # =========================================================================
+    elif pagina == "👑 Coordenação":
+        st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
+        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
         
-        if arquivos_para_zipar > 1:
-            st.markdown("### 📦 Download Unificado")
-            st.download_button(
-                label=f"📥 Baixar Todos os {arquivos_para_zipar} Relatórios (.ZIP)",
-                data=zip_buffer,
-                file_name=f"FiscFlow_pacote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-            st.write("---")
+        st.info("📌 Módulo de Coordenação em fase de estruturação. Em breve trará gráficos comparativos, taxas de conclusão por analista/fiscal e indicadores gerais.")
 
-        st.markdown("### 🔍 Detalhes Individuais dos Itens Selecionados")
-        for _, row in selecionados.iterrows():
-            modelo, risco = extrair_classe_e_modelo(row)
-            if not modelo: continue
-            
-            caminho = os.path.join("modelos", modelo)
-            if not os.path.exists(caminho): continue
-
-            grandeza_texto, grandeza_pontos = processar_grandeza(row.get('grandeza', ''))
-            nivel_texto = processar_nivel(row.get('nivel', ''))
-
-            dados_unitarios = {
-                "<<siema>>": t_tag(row.get('siema', ''), "siema"),
-                "<<processo_sei>>": t_tag(row.get('processo_sei', ''), "processo_sei"),
-                "<<laudo_sei>>": str(row.get('laudo_sei', '')).split('.')[0],
-                "<<data_acid>>": converter_data_excel(row.get('data_acid', '')),
-                "<<relat_sei>>": t_tag(row.get('relat_sei', ''), "raipo_sei"),
-                "<<instalacao>>": t_tag(row.get('instalacao', ''), "instalacao"),
-                "<<campo>>": t_tag(row.get('campo', ''), "campo"),
-                "<<bacia>>": t_tag(row.get('bacia', ''), "bacia"),
-                "<<empresa>>": t_tag(row.get('empresa', ''), "empresa"),
-                "<<cnpj>>": t_tag(row.get('cnpj', ''), "cnpj"),
-                "<<produto>>": t_tag(row.get('produto', ''), "produto"),
-                "<<class_ol>>": t_tag(row.get('class_ol', ''), "class_ol"),
-                "<<class_risco>>": risco,
-                "<<vol_char>>": extrair_volume_texto(row.get('vol_char', '')),
-                "<<lat>>": t_tag(row.get('lat', ''), "lat"),
-                "<<lon>>": t_tag(row.get('lon', ''), "lon"),
-                "<<grandeza>>": t_tag(row.get('grandeza', ''), "grandeza"),
-                "<<grandeza_texto>>": grandeza_texto,
-                "<<grandeza_pontos>>": grandeza_pontos,
-                "<<nivel>>": t_tag(row.get('nivel', ''), "nivel"),
-                "<<nivel_pontos>>": t_tag(row.get('nivel_pontos', ''), "nivel_pontos"),
-                "<<nivel_texto>>": nivel_texto,
-                "<<multa_num>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
-                "<<multa_char>>": t_tag(row.get('multa_char', ''), "multa_aplicada"),
-                "<<data_ai>>": converter_data_excel(row.get('data_ai', '')),
-                "<<auto>>": t_tag(row.get('auto', ''), "auto_infracao"),
-                "<<jurisdicao>>": determinar_jurisdicao(row.get('bacia', ''))
-            }
-            
-            doc_io_unitario = preencher_documento(caminho, dados_unitarios)
-            nome = f"Rel_Fisc_{row['num_doc']}.docx"
-            
-            texto_previa = gerar_previa_texto(modelo, dados_unitarios)
-            
-            with st.container(border=True):
-                st.write(f"📄 **ID:** {row['num_doc']} | **Processo:** {row['processo_sei']} | **Empresa:** {row['empresa']}")
-                
-                st.markdown("**📝 Descrição da Infração (Prévia do Auto e Relatório de Fiscalização):**")
-                st.markdown(f"> *{texto_previa}*")
-                
-                st.download_button(label="Baixar Relatório Isolado", data=doc_io_unitario, file_name=nome, key=f"dl_{row['num_doc']}")
 else:
     st.info("Aguardando carregamento dos dados do SharePoint...")
