@@ -7,6 +7,7 @@ import os
 import requests
 import zipfile
 from datetime import datetime, timedelta
+import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -304,14 +305,90 @@ if df_original is not None and not df_original.empty:
     # 🎯 FILTRO DO UNIVERSO AMOSTRAL: Apenas processos com número SEI/PROCESSO preenchido
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
 
+    # Tratamentos padronizados para visualização
+    df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
+    df['f_limpo'] = df['fiscal'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
+
     # =========================================================================
     # 👑 PÁGINA 1: COORDENAÇÃO (VISÃO GERAL & GESTÃO DA ESTEIRA)
     # =========================================================================
     if pagina == "👑 Coordenação":
         st.title("👑 Coordenação — Visão Geral & Gestão da Esteira")
-        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento da força-tarefa")
+        st.caption("Painel de acompanhamento macro, distribuição de carga e monitoramento do desempenho da força-tarefa")
+
+        # --- CARDS DE KPIs GLOBAIS ---
+        tot_ft = len(df)
+        laudo_vazio = df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])
+        pend_laudo = len(df[laudo_vazio])
         
-        st.info("📌 Módulo de Coordenação em fase de estruturação. Em breve trará gráficos comparativos, taxas de conclusão por analista/fiscal e indicadores gerais.")
+        situ_s = df['situacao'].astype(str).str.strip().str.lower()
+        auto_s = df['auto'].astype(str).str.strip()
+        
+        is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
+        is_ai = situ_s == 'processo ai gerado'
+        
+        pend_auto = len(df[(~laudo_vazio) & (~is_auto)])
+        pend_proc_ai = len(df[is_auto & (~is_ai)])
+        concluidos = len(df[is_ai])
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total de Processos FT", tot_ft)
+        c2.metric("Pendentes de Laudo", pend_laudo)
+        c3.metric("Pendentes de Auto", pend_auto)
+        c4.metric("Pendentes Proc. AI", pend_proc_ai)
+        c5.metric("Proc. AI Gerados", concluidos)
+
+        st.write("---")
+
+        # --- CARGA DE TRABALHO POR ANALISTA E FISCAL ---
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            st.markdown("### 🔬 Carga por Servidor de Laudo")
+            df_l = df.copy()
+            df_l['Status_Laudo'] = df_l['laudo_sei'].apply(lambda x: 'Concluído' if str(x).strip() not in ["", "nan", "None"] else 'Pendente')
+            df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
+            
+            fig_laudo = px.bar(
+                df_l_g, 
+                y='s_laudo_limpo', 
+                x='Quantidade', 
+                color='Status_Laudo',
+                orientation='h',
+                color_discrete_map={'Pendente': '#EAB308', 'Concluído': '#4E5D30'}
+            )
+            fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
+            st.plotly_chart(fig_laudo, use_container_width=True)
+
+        with col_g2:
+            st.markdown("### ⚖️ Carga por Fiscal Responsável")
+            df_fisc = df.copy()
+            df_f_g = df_fisc.groupby(['f_limpo', 'situacao']).size().reset_index(name='Quantidade')
+            
+            fig_fisc = px.bar(
+                df_f_g, 
+                y='f_limpo', 
+                x='Quantidade', 
+                color='situacao',
+                orientation='h'
+            )
+            fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
+            st.plotly_chart(fig_fisc, use_container_width=True)
+
+        st.write("---")
+
+        # --- DISTRIBUIÇÃO POR BACIA SEDIMENTAR ---
+        st.markdown("### 🌊 Distribuição de Processos por Bacia Sedimentar")
+        df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
+        fig_bacia = px.bar(
+            df_bacia, 
+            x='bacia', 
+            y='Quantidade', 
+            color='situacao',
+            barmode='group'
+        )
+        fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title="Quantidade de Processos", margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig_bacia, use_container_width=True)
 
     # =========================================================================
     # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
@@ -319,14 +396,6 @@ if df_original is not None and not df_original.empty:
     elif pagina == "🔬 Análise Técnica":
         st.title("🔬 Análise Técnica — Instrução de Laudos")
         st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
-        
-        # Tratamento do Servidor de Laudo
-        df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({
-            "": "Não Atribuído", 
-            "nan": "Não Atribuído", 
-            "None": "Não Atribuído", 
-            "0": "Não Atribuído"
-        })
         
         # --- FILTROS DE ANÁLISE TÉCNICA ---
         with st.container(border=True):
@@ -388,7 +457,7 @@ if df_original is not None and not df_original.empty:
             "Vol (m³)": [extrair_volume_texto(v) for v in df_laudo['vol_char']],
             "Class OL": df_laudo['class_ol'].astype(str),
             "Risco": df_laudo['class_risco'].astype(str),
-            "Fiscal Responsável": df_laudo['fiscal'].astype(str)
+            "Fiscal Responsável": df_laudo['f_limpo'].astype(str)
         })
         
         st.dataframe(
@@ -413,7 +482,6 @@ if df_original is not None and not df_original.empty:
                 op_situ = sorted(df['situacao'].astype(str).unique())
                 sel_situ = st.multiselect("SITUAÇÃO:", op_situ, default=["Autuar"] if "Autuar" in op_situ else [])
             with c2:
-                df['f_limpo'] = df['fiscal'].astype(str).replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
                 op_fisc = sorted(df['f_limpo'].unique())
                 sel_fisc = st.multiselect("FISCAL:", ["Todos"] + op_fisc, default=["Todos"])
             with c3:
@@ -430,7 +498,6 @@ if df_original is not None and not df_original.empty:
 
         prontos_autuacao = len(df_metricas_fisc[situ_str.str.lower() == 'autuar'])
         
-        # Auto lavrado: considerado quando a situação é 'Auto Lavrado' OU quando a coluna AUTO_INFRACAO está preenchida
         is_auto_lavrado = (situ_str.str.lower() == 'auto lavrado') | (~auto_str.str.lower().isin(["", "nan", "none", "0", "processo não encontrado"]))
         is_ai_gerado = situ_str.str.lower() == 'processo ai gerado'
         
