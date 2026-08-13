@@ -7,6 +7,7 @@ import os
 import requests
 import zipfile
 import random
+import json
 from datetime import datetime, timedelta
 import plotly.express as px
 
@@ -211,9 +212,6 @@ def gerar_previa_texto(modelo, dicionario_dados):
     return texto
 
 # --- CARREGAMENTO CENTRALIZADO DE DADOS E EQUIPE ---
-import json
-
-# --- CARREGAMENTO CENTRALIZADO DE DADOS E EQUIPE ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
@@ -224,18 +222,12 @@ def carregar_dados_sharepoint():
         
         texto_resposta = resposta.text.strip()
         
-        # Tenta fazer o parse JSON padrão
         try:
             dados_json = json.loads(texto_resposta)
         except json.JSONDecodeError as e:
-            # Caso haja caracteres extras no final (Extra data), tenta isolar o primeiro objeto JSON válido
-            st.warning(f"⚠️ Aviso de formato no Power Automate ({e}). Tentando recuperar o conteúdo principal...")
-            
-            # Tenta decodificar até o ponto de erro se for Extra data
             decoder = json.JSONDecoder()
             dados_json, _ = decoder.raw_decode(texto_resposta)
 
-        # Suporta tanto retorno unificado quanto lista direta
         if isinstance(dados_json, dict):
             proc_list = dados_json.get("processos", dados_json.get("value", []))
             equipe_list = dados_json.get("equipe", [])
@@ -307,31 +299,36 @@ if df_original is not None and not df_original.empty:
     df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
     df['f_limpo'] = df['fiscal'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
 
+    # --- PROCESSAMENTO DA TABELA EQUIPE ---
+    df_equipe = pd.DataFrame()
+    if df_equipe_raw is not None and not df_equipe_raw.empty:
+        df_equipe_raw.columns = df_equipe_raw.columns.astype(str).str.strip()
+        c_nome = buscar_coluna_flexivel(df_equipe_raw, ['Nome', 'NOME', 'Servidor', 'Analista', 'Fiscal'])
+        c_email = buscar_coluna_flexivel(df_equipe_raw, ['E_Mail', 'Email', 'E-mail', 'MAIL'])
+        c_perfil = buscar_coluna_flexivel(df_equipe_raw, ['Perfil', 'PERFIL', 'Funcao', 'Cargo'])
+
+        df_equipe = pd.DataFrame({
+            'nome': df_equipe_raw[c_nome].astype(str).str.strip() if c_nome else "",
+            'email': df_equipe_raw[c_email].astype(str).str.strip() if c_email else "",
+            'perfil': df_equipe_raw[c_perfil].astype(str).str.strip() if c_perfil else ""
+        })
+        df_equipe = df_equipe[~df_equipe['nome'].isin(["", "nan", "None"])].reset_index(drop=True)
+
     # --- IDENTIFICAÇÃO E AUTENTICAÇÃO DO USUÁRIO ---
-    # Tenta obter o e-mail do Streamlit Cloud; em desenvolvimento local, utiliza seletor/fallback
     email_usuario_logado = getattr(st, "user", None) and getattr(st.user, "email", None)
     
     if not email_usuario_logado:
-        # Fallback para ambiente local/desenvolvimento
         email_usuario_logado = st.sidebar.text_input("👤 E-mail de Acesso (Simulação):", value="tiago.farani@ibama.gov.br")
 
-    # Identificação do perfil do usuário logado baseado na aba Equipe
     perfil_usuario = "Visitante"
     nome_usuario = email_usuario_logado
     
-    if df_equipe_raw is not None and not df_equipe_raw.empty:
-        df_equipe_raw.columns = df_equipe_raw.columns.astype(str).str.strip()
-        col_email = buscar_coluna_flexivel(df_equipe_raw, ['E_Mail', 'Email', 'E-mail'])
-        col_perfil = buscar_coluna_flexivel(df_equipe_raw, ['Perfil', 'PERFIL'])
-        col_nome = buscar_coluna_flexivel(df_equipe_raw, ['Nome', 'NOME'])
-        
-        if col_email and col_perfil:
-            match_u = df_equipe_raw[df_equipe_raw[col_email].astype(str).str.strip().str.lower() == email_usuario_logado.strip().lower()]
-            if not match_u.empty:
-                perfil_usuario = str(match_u.iloc[0][col_perfil]).strip()
-                if col_nome: nome_usuario = str(match_u.iloc[0][col_nome]).strip()
+    if not df_equipe.empty:
+        match_u = df_equipe[df_equipe['email'].str.lower() == email_usuario_logado.strip().lower()]
+        if not match_u.empty:
+            perfil_usuario = match_u.iloc[0]['perfil']
+            nome_usuario = match_u.iloc[0]['nome']
     else:
-        # Se não houver tabela equipe carregada ainda, assume acesso liberado para coordenação
         perfil_usuario = "Coordenação"
 
     is_coordenador = perfil_usuario.lower() in ["coordenação", "coordenacao", "admin"]
@@ -467,10 +464,10 @@ if df_original is not None and not df_original.empty:
                     op_bacia_c = ["Todas"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
                     sel_bacia_c = st.selectbox("Bacia Sedimentar:", op_bacia_c, index=0)
                 with f_col2:
-                    op_serv_c = ["Todos"] + sorted(df['s_laudo_limpo'].unique())
+                    op_serv_c = ["Todos"] + sorted(list(set(df['s_laudo_limpo'].unique().tolist() + (df_equipe['nome'].tolist() if not df_equipe.empty else []))))
                     sel_serv_c = st.selectbox("Servidor Laudo:", op_serv_c, index=0)
                 with f_col3:
-                    op_fisc_c = ["Todos"] + sorted(df['f_limpo'].unique())
+                    op_fisc_c = ["Todos"] + sorted(list(set(df['f_limpo'].unique().tolist() + (df_equipe['nome'].tolist() if not df_equipe.empty else []))))
                     sel_fisc_c = st.selectbox("Fiscal Responsável:", op_fisc_c, index=0)
                 with f_col4:
                     op_situ_c = ["Todas"] + sorted(df['situacao'].astype(str).unique())
@@ -488,8 +485,14 @@ if df_original is not None and not df_original.empty:
                 st.markdown("**⚡ Painel de Atribuição e Alteração em Lote**")
                 a_col1, a_col2, a_col3, a_col4 = st.columns(4)
                 
-                lista_servidores = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
-                lista_fiscais = sorted([f for s in [df['f_limpo'].unique()] for f in s if f != "Não Atribuído"])
+                # Obtém servidores cadastrados na Equipe + existentes na base
+                if not df_equipe.empty:
+                    lista_servidores = sorted(list(set(df_equipe['nome'].tolist() + [s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])))
+                    lista_fiscais = sorted(list(set(df_equipe['nome'].tolist() + [f for f in df['f_limpo'].unique() if f != "Não Atribuído"])))
+                else:
+                    lista_servidores = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
+                    lista_fiscais = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
+
                 lista_situacoes = sorted([s for s in df['situacao'].astype(str).unique() if s])
 
                 with a_col1:
@@ -575,7 +578,6 @@ if df_original is not None and not df_original.empty:
                 bacias_disp = ["Todas as Bacias"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
                 bacia_alvo = st.selectbox("Filtrar Bacia Sedimentar:", bacias_disp)
 
-                # Filtra processos pendentes conforme a tarefa
                 if "Laudo" in tipo_tarefa:
                     df_pend = df[df['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo']
                 else:
@@ -590,13 +592,25 @@ if df_original is not None and not df_original.empty:
                 qtd_distribuir = st.number_input("Quantidade de processos a atribuir nesta rodada:", min_value=1, max_value=max(1, qtd_disponivel), value=min(5, max(1, qtd_disponivel)))
 
             with col_a2:
-                st.markdown("**2. Equipe Elegível (Servidores)**")
+                st.markdown("**2. Equipe Elegível (Servidores Cadastrados)**")
                 
-                # Obtém lista de servidores da aba Equipe ou da base
-                if "Laudo" in tipo_tarefa:
-                    servidores_base = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
+                # Busca servidores cadastrados na Tabela Equipe filtrando por perfil
+                if not df_equipe.empty:
+                    if "Laudo" in tipo_tarefa:
+                        mask_laudo = df_equipe['perfil'].str.lower().str.contains("análise|tecnica|laudo|coord", na=False)
+                        eq_filtrada = df_equipe[mask_laudo]
+                        if eq_filtrada.empty: eq_filtrada = df_equipe
+                        servidores_base = sorted(eq_filtrada['nome'].unique().tolist())
+                    else:
+                        mask_fisc = df_equipe['perfil'].str.lower().str.contains("fisc|coord", na=False)
+                        eq_filtrada = df_equipe[mask_fisc]
+                        if eq_filtrada.empty: eq_filtrada = df_equipe
+                        servidores_base = sorted(eq_filtrada['nome'].unique().tolist())
                 else:
-                    servidores_base = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
+                    if "Laudo" in tipo_tarefa:
+                        servidores_base = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
+                    else:
+                        servidores_base = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
 
                 servidores_selecionados = st.multiselect("Selecione os servidores que participarão do sorteio:", servidores_base, default=servidores_base)
 
@@ -608,10 +622,8 @@ if df_original is not None and not df_original.empty:
                 elif not servidores_selecionados:
                     st.error("Selecione pelo menos um servidor elegível para receber atribuições.")
                 else:
-                    # Algoritmo de menor carga + sorteio aleatório em caso de empate
                     df_alvo_dist = df_pend.head(qtd_distribuir).copy()
                     
-                    # Calcula carga atual de cada servidor selecionado
                     if "Laudo" in tipo_tarefa:
                         cargas = {s: len(df[df['s_laudo_limpo'] == s]) for s in servidores_selecionados}
                     else:
@@ -620,14 +632,10 @@ if df_original is not None and not df_original.empty:
                     atribuicoes_resultado = []
 
                     for _, row in df_alvo_dist.iterrows():
-                        # Identifica a menor carga entre os elegíveis
                         menor_c = min(cargas.values())
                         candidatos_menor_carga = [s for s, c in cargas.items() if c == menor_c]
                         
-                        # Sorteia aleatoriamente entre os de menor carga
                         escolhido = random.choice(candidatos_menor_carga)
-                        
-                        # Incrementa a carga simulada do escolhido
                         cargas[escolhido] += 1
                         atribuicoes_resultado.append(escolhido)
 
@@ -638,7 +646,6 @@ if df_original is not None and not df_original.empty:
                         "tipo": tipo_tarefa
                     }
 
-            # Se houver simulação realizada, exibe a tabela e o botão de confirmação
             if 'resultado_distribuicao' in st.session_state:
                 res = st.session_state['resultado_distribuicao']
                 df_res = res['df']
@@ -652,7 +659,7 @@ if df_original is not None and not df_original.empty:
                     "Bacia": df_res['bacia'].astype(str),
                     "Empresa": df_res['empresa'].astype(str),
                     "Situação Atual": df_res['situacao'].astype(str),
-                    "Novo Responsável Sortead": df_res['Novo_Responsavel'].astype(str)
+                    "Novo Responsável Sorteado": df_res['Novo_Responsavel'].astype(str)
                 })
 
                 st.dataframe(df_previa_exib, hide_index=True, use_container_width=True)
