@@ -314,42 +314,74 @@ if df_original is not None and not df_original.empty:
         })
         df_equipe = df_equipe[~df_equipe['nome'].isin(["", "nan", "None"])].reset_index(drop=True)
 
-    # --- IDENTIFICAÇÃO E AUTENTICAÇÃO ESTRITA DO USUÁRIO ---
-    # Tenta capturar o e-mail autenticado nativamente pelo Streamlit Cloud OTP
+    # =========================================================================
+    # 🔒 IDENTIFICAÇÃO E AUTENTICAÇÃO SEGURA HÍBRIDA (SSO + PIN/SENHA)
+    # =========================================================================
     email_usuario_logado = None
-    
-    if hasattr(st, "user") and getattr(st.user, "email", None):
-        email_usuario_logado = st.user.email
-    elif hasattr(st, "experimental_user") and getattr(st.experimental_user, "email", None):
-        email_usuario_logado = st.experimental_user.email
 
-    # Se o e-mail não foi fornecido pelo Streamlit Cloud (ex: ambiente local de dev), exibe caixa de simulação
+    # 1. Tenta capturar o e-mail injetado pelo Streamlit Cloud SSO
+    try:
+        if hasattr(st, "user") and st.user and getattr(st.user, "email", None):
+            val_email = str(st.user.email).strip().lower()
+            if val_email: email_usuario_logado = val_email
+        elif hasattr(st, "experimental_user") and st.experimental_user and getattr(st.experimental_user, "email", None):
+            val_email = str(st.experimental_user.email).strip().lower()
+            if val_email: email_usuario_logado = val_email
+    except Exception:
+        email_usuario_logado = None
+
+    # 2. Se o SSO automático não forneceu o e-mail, exige E-mail + Senha de Acesso
     if not email_usuario_logado:
-        st.sidebar.warning("⚠️ Modo Local / Público")
-        email_usuario_logado = st.sidebar.text_input(
-            "👤 E-mail de Acesso (Simulação):", 
-            value="", 
-            placeholder="seu.email@ibama.gov.br"
-        )
-    else:
-        st.sidebar.success("🔒 Autenticado via Streamlit Cloud")
+        if "email_autenticado_sessao" not in st.session_state:
+            st.session_state["email_autenticado_sessao"] = None
 
-    perfil_usuario = "Não Cadastrado"
-    nome_usuario = email_usuario_logado.strip() if email_usuario_logado and email_usuario_logado.strip() else "Usuário Não Autenticado"
-    
-    # Validação rigorosa contra a aba Equipe
-    if not df_equipe.empty and email_usuario_logado and email_usuario_logado.strip():
-        match_u = df_equipe[df_equipe['email'].str.lower() == email_usuario_logado.strip().lower()]
+        if st.session_state["email_autenticado_sessao"]:
+            email_usuario_logado = st.session_state["email_autenticado_sessao"]
+            st.sidebar.success(f"🔒 **Sessão Ativa**\n\n✉️ `{email_usuario_logado}`")
+            if st.sidebar.button("🚪 Sair / Logoff", use_container_width=True):
+                st.session_state["email_autenticado_sessao"] = None
+                st.rerun()
+        else:
+            with st.sidebar.container(border=True):
+                st.markdown("🔑 **Painel de Autenticação**")
+                input_email = st.text_input("👤 E-mail Cadastrado:", placeholder="seu.email@ibama.gov.br").strip().lower()
+                input_senha = st.text_input("🔒 Chave de Acesso (PIN):", type="password")
+                
+                btn_login = st.button("🔓 Entrar no Sistema", use_container_width=True)
+
+                senha_correta = st.secrets.get("senha_acesso", "Ibama2026@FT")
+
+                if btn_login:
+                    if not input_email or not input_senha:
+                        st.error("Preencha o e-mail e a senha.")
+                    elif input_senha != senha_correta:
+                        st.error("⛔ Chave de Acesso incorreta.")
+                    else:
+                        st.session_state["email_autenticado_sessao"] = input_email
+                        st.success("Autenticado com sucesso!")
+                        st.rerun()
+
+    perfil_usuario = "Não Autenticado"
+    nome_usuario = "Usuário Não Identificado"
+
+    # Função para verificar se o e-mail logado coincide com o cadastro (suporta múltiplos e-mails por célula)
+    def checar_email_cadastrado(email_celula, email_logado):
+        if not email_logado: return False
+        emails = [e.strip().lower() for e in str(email_celula).replace(";", ",").split(",") if e.strip()]
+        return email_logado in emails
+
+    # 3. Validação do Perfil contra a Tabela Equipe no SharePoint
+    if email_usuario_logado and not df_equipe.empty:
+        match_u = df_equipe[df_equipe['email'].apply(lambda cell: checar_email_cadastrado(cell, email_usuario_logado))]
         if not match_u.empty:
             perfil_usuario = str(match_u.iloc[0]['perfil']).strip()
             nome_usuario = str(match_u.iloc[0]['nome']).strip()
         else:
             perfil_usuario = "Não Cadastrado na Equipe"
-    else:
-        if df_equipe.empty:
-            perfil_usuario = "Aba Equipe Não Configurada"
+    elif df_equipe.empty:
+        perfil_usuario = "Aba Equipe Não Encontrada"
 
-    # Validação estrita: apenas o perfil 'Coordenação' ou 'Admin' acessa a tela de Coordenação
+    # Permissão estrita: Apenas perfis 'Coordenação' ou 'Admin' acessam o módulo restrito
     is_coordenador = perfil_usuario.lower() in ["coordenação", "coordenacao", "admin"]
 
     # --- NAVEGAÇÃO CONDICIONAL ---
