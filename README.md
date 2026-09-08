@@ -1,7 +1,3 @@
-Aqui está o **`README.md`** completo e atualizado, contemplando todas as novas funcionalidades implementadas hoje: o **fluxo bidirecional do Power Automate** (Leitura e Atualização), o **mecanismo híbrido de autenticação e controle de acesso por perfil**, a **aba de gestão da equipe**, e o **algoritmo de distribuição automática balanceada de carga**.
-
----
-
 # ⚖️ FiscFlow — IBAMA: Gestão de Esteira, Atribuição Automática e Automação de Relatórios
 
 Aplicativo web desenvolvido em **Streamlit** para acompanhamento macro de processos, distribuição automática balanceada de carga de trabalho, gestão de atribuições e geração em lote de **Relatórios de Fiscalização** em formato Word (`.docx`), integrado de forma bidirecional ao **SharePoint via Power Automate**.
@@ -197,10 +193,73 @@ base = "light"
 
 ---
 
-## 🛠️ 7. Procedimento para Manutenção ou Nova Força-Tarefa
+❓ Perguntas Frequentes (FAQ) & Guia de Solução de Problemas
+🔐 1. Autenticação, Perfis de Acesso e Governança
+Como um novo servidor solicita acesso ao FiscFlow?
+Na tela inicial do aplicativo, o servidor acessa a aba 📝 Criar Conta / Solicitar Acesso.
 
-1. Suba a nova planilha no **SharePoint** contendo as tabelas formatadas `Processos_FT` e `Equipe`.
-2. Atualize o fluxo no **Power Automate** (`FT_Plataformar_Ler_Atualizar_Dados`) para apontar para as tabelas do novo arquivo.
-3. Certifique-se de que o Gatilho HTTP do Power Automate possui o esquema JSON atualizado para aceitar as ações `"LER"` e `"ATUALIZAR"`.
-4. Atualize a chave `url_planilha` nos **Secrets** do Streamlit Cloud com a URL HTTP POST do fluxo.
-5. Cadastre os e-mails e perfis dos servidores na aba `Equipe` para liberar os acessos correspondentes.
+Informa seu nome completo, e-mail funcional (@ibama.gov.br), define uma senha de acesso e seleciona as atribuições desejadas (Análise Técnica, Fiscalização e/ou Coordenação).
+
+Ao submeter o formulário, o aplicativo envia uma requisição CADASTRAR_USUARIO para o Power Automate, que grava o registro com status PENDENTE e dispara um cartão de aprovação interativo diretamente para a caixa de entrada da Coordenação.
+
+Como a Coordenação autoriza uma nova solicitação de acesso?
+A Coordenação recebe uma notificação interativa no Outlook (Actionable Message / Cartão do Power Automate Approvals).
+
+No próprio corpo do e-mail, é possível visualizar os dados do solicitante e clicar em [Aprovar] ou [Rejeitar].
+
+O Power Automate processa a decisão e atualiza o campo Status para APROVADO ou REJEITADO na planilha restrita FiscFlow_Equipe.xlsx.
+
+As senhas dos usuários ficam visíveis para quem acessa o SharePoint?
+Não. Antes do envio, a senha é processada pelo algoritmo PBKDF2-HMAC-SHA256 com derivação de 100.000 iterações e geração de um Salt criptográfico individual aleatório de 16 bytes. O valor gravado no Excel segue o formato salt$hash (exemplo: a3f89...$e7b21...), sendo irreversível.
+
+Por que a tabela de equipe foi isolada em outro arquivo (FiscFlow_Equipe.xlsx)?
+A funcionalidade nativa do Excel de proteger planilhas por senha bloqueia os conectores do Power Automate. Separar a equipe em uma pasta restrita (/Gestao_Acesso/) garante proteção por permissões de rede corporativa sem interferir na esteira de automação.
+
+⚙️ 2. Arquitetura do Fluxo Power Automate
+Para que serve o menu "🛠️ Diagnóstico da Conexão" na barra lateral?
+É um recurso exclusivo para usuários com perfil de Coordenação. Ele exibe a quantidade exata de linhas brutas recebidas de cada planilha e lista todas as colunas detectadas. Caso um cabeçalho seja renomeado acidentalmente no Excel (por exemplo, de PROCESSO para Processo SEI), a divergência é identificada na hora.
+
+🛠️ 3. Resolução de Erros Comuns (Troubleshooting)
+❌ Erro: 400 Client Error: Bad Request for url: ...
+Causa: O gatilho HTTP do Power Automate possui Validação de Esquema (Schema Validation) ativada ou campos marcados como "required": [...] no JSON. Quando o Streamlit envia {"acao": "LER"}, a requisição é barrada no gatilho.
+
+Solução: No primeiro bloco do fluxo, clique em ... ➔ Configurações, desative a Validação de Esquema e apague qualquer trecho "required": [...] do esquema JSON.
+
+❌ Erro: O editor do Power Automate fica carregando em loop infinito (círculos girando)
+Causa: Instabilidade do Novo Designer (Modern Designer) da Microsoft ao processar condições aninhadas em cascata.
+
+Solução: Clique no menu ... no canto superior direito do Power Automate e selecione "Alternar para o designer clássico".
+
+❌ Erro: Expecting value: line 1 column 1 (char 0) no Streamlit
+Causa: O Power Automate retornou HTTP 200, mas o corpo da resposta (Body) estava completamente vazio.
+
+Solução: No bloco Resposta de leitura, defina o cabeçalho Content-Type: application/json e insira o JSON mapeado com os blocos dinâmicos value:
+
+JSON
+{
+  "processos": @{body('Listar_linhas_presentes_em_uma_tabela_(Processos_FT)')?['value']},
+  "equipe": @{body('Listar_linhas_presentes_em_uma_tabela_(Equipe)')?['value']}
+}
+❌ Erro: StreamlitAPIException no st.data_editor
+Causa: A tabela de processos ficou vazia e o componente tentou instanciar uma coluna booleana com [marcar_todos] * 0, gerando uma lista vazia de tipo object.
+
+Solução: Forçar o tipo da série como booleano:
+
+Python
+"Selecionar": pd.Series([marcar_todos] * len(df_f), dtype=bool)
+e encapsular a renderização em if df_f.empty: st.warning(...) else: st.data_editor(...).
+
+❌ A tabela de processos exibe nomes e e-mails em vez de processos SEI
+Causa: No bloco Resposta do Power Automate, o campo "processos":  recebeu acidentalmente o value da ação da tabela Equipe.
+
+Solução: No campo "processos": , selecione estritamente o value da ação Listar linhas presentes em uma tabela (Processos FT).
+
+❌ Ao clicar em "Aprovar" no e-mail, o usuário é marcado como REJEITADO
+Causa: Na Condição 3, o campo de comparação foi preenchido com aspas literais: 'Approve'.
+
+Solução: Digite a palavra limpa, sem aspas: Approve.
+
+❌ Fiz alterações no SharePoint, mas o aplicativo continua mostrando dados antigos
+Causa: Cache local do Streamlit (@st.cache_data(ttl=300)).
+
+Solução: Pressione a tecla C no navegador para limpar o cache e recarregue com Ctrl + F5.
