@@ -235,7 +235,15 @@ def carregar_dados_sharepoint():
         url = st.secrets["sharepoint"]["url_planilha"]
         headers = {"Content-Type": "application/json"}
         resposta = requests.post(url, headers=headers, json={"acao": "LER"})
+        
+        # Se retornar erro 400, exibe o corpo exato da resposta da Microsoft
+        if not resposta.ok:
+            st.error(f"Erro {resposta.status_code} retornado pelo Power Automate:")
+            st.code(resposta.text, language="json")
+            return None, None
+            
         resposta.raise_for_status()
+    
         
         texto_resposta = resposta.text.strip()
         try:
