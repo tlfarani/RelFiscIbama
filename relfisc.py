@@ -269,7 +269,7 @@ def carregar_dados_sharepoint():
 df_original, df_equipe_raw = carregar_dados_sharepoint()
 
 # --- DIAGNÓSTICO EM TEMPO REAL NA BARRA LATERAL --- Exibe diagnóstico técnico exclusivamente para a Coordenação
-    if is_coordenador:
+if is_coordenador:
         with st.sidebar.expander("🛠️ Diagnóstico da Conexão", expanded=False):
             qtd_proc_bruta = len(df_original) if df_original is not None else 0
             qtd_eq_bruta = len(df_equipe_raw) if df_equipe_raw is not None else 0
