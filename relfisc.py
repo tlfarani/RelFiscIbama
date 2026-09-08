@@ -8,6 +8,8 @@ import requests
 import zipfile
 import random
 import json
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 import plotly.express as px
 
@@ -15,27 +17,22 @@ import plotly.express as px
 st.set_page_config(
     page_title="FiscFlow — IBAMA", 
     layout="wide", 
-    page_icon="🔄"
+    page_icon="⚖️"
 )
 
-# --- CUSTOMIZAÇÃO COMPLETA DE INTERFACE (BLINDAGEM VISUAL) ---
+# --- CUSTOMIZAÇÃO VISUAL INSTITUCIONAL ---
 st.markdown("""
     <style>
-    /* 1. Títulos e Subtítulos em Verde Musgo */
     h1, h2, h3, .stSubheader, [data-testid="stWidgetLabel"] p {
         color: #4E5D30 !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
         font-weight: bold !important;
     }
-
-    /* 2. Customização das tags internas escolhidas no Multiselect */
     span[data-baseweb="tag"] {
         background-color: #E9EDDE !important;
         color: #4E5D30 !important;
         border: 1px solid #4E5D30 !important;
     }
-
-    /* 3. Estilização Firme dos Botões */
     div.stButton > button:first-child, 
     div.stDownloadButton > button:first-child, 
     div.stLinkButton > a {
@@ -61,8 +58,6 @@ st.markdown("""
         border-color: #3A471E !important;
         color: #FFFFFF !important;
     }
-
-    /* 4. BLINDAGEM DOS FILTROS */
     div[data-baseweb="select"] > div {
         background-color: #FFFFFF !important;
         color: #000000 !important;
@@ -74,8 +69,6 @@ st.markdown("""
     div[data-baseweb="select"] svg {
         fill: #4E5D30 !important;
     }
-
-    /* 5. INJEÇÃO CIRÚRGICA DE CORES ALTERNADAS FIXAS NA TABELA STREAMLIT */
     div[data-testid="stDataEditor"] th {
         background-color: #4E5D30 !important;
         color: #F2F2F2 !important;
@@ -92,12 +85,40 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE TRATAMENTO ---
+# =========================================================================
+# 🔒 CRIPTOGRAFIA DE SENHAS (PBKDF2-HMAC-SHA256 COM SALT)
+# =========================================================================
+def gerar_hash(senha: str) -> str:
+    """Gera um hash criptográfico com salt aleatório no formato salt$hash"""
+    if not senha: return ""
+    salt = secrets.token_hex(16)
+    chave = hashlib.pbkdf2_hmac('sha256', senha.strip().encode('utf-8'), bytes.fromhex(salt), 100_000)
+    return f"{salt}${chave.hex()}"
 
+def validar_senha(senha_digitada: str, hash_armazenado: str) -> bool:
+    """Valida a senha contra o hash armazenado, aceitando formato legado de migração"""
+    if not senha_digitada or not hash_armazenado: return False
+    senha_digitada = senha_digitada.strip()
+    hash_armazenado = str(hash_armazenado).strip()
+
+    if "$" in hash_armazenado:
+        try:
+            salt, chave_esperada = hash_armazenado.split("$", 1)
+            chave_calculada = hashlib.pbkdf2_hmac('sha256', senha_digitada.encode('utf-8'), bytes.fromhex(salt), 100_000).hex()
+            return secrets.compare_digest(chave_calculada, chave_esperada)
+        except Exception:
+            return False
+
+    # Suporte para a senha inicial do coordenador inserida manualmente em texto puro
+    if senha_digitada == hash_armazenado: return True
+    # Suporte legado SHA-256
+    hash_simples = hashlib.sha256(senha_digitada.encode('utf-8')).hexdigest()
+    return secrets.compare_digest(hash_simples, hash_armazenado)
+
+# --- FUNÇÕES AUXILIARES DE TRATAMENTO ---
 def converter_data_excel(valor):
     val_str = str(valor).strip()
-    if not val_str or val_str in ["nan", "None", "0"]:
-        return " [ DATA - EDITAR MANUAL ] "
+    if not val_str or val_str in ["nan", "None", "0"]: return " [ DATA - EDITAR MANUAL ] "
     if val_str.isdigit():
         try:
             dias = int(val_str)
@@ -125,13 +146,9 @@ def extrair_volume_texto(valor):
 
 def t_tag(valor, nome_tag):
     v_s = str(valor).strip()
-    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: 
-        return f" [ {nome_tag.upper()} - EDITAR MANUAL ] "
-    if nome_tag == "siema" and "fora do ar" in v_s.lower():
-        return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
+    if v_s in ["", "nan", "None", "0", "Processo Não Encontrado"]: return f" [ {nome_tag.upper()} - EDITAR MANUAL ] "
+    if nome_tag == "siema" and "fora do ar" in v_s.lower(): return " [ SIEMA FORA DO AR - EDITAR MANUAL ] "
     return v_s
-
-# --- FUNÇÕES DE NEGÓCIO ---
 
 def determinar_jurisdicao(bacia):
     bacia_limpa = str(bacia).lower().strip()
@@ -211,7 +228,7 @@ def gerar_previa_texto(modelo, dicionario_dados):
         texto = texto.replace(chave, str(valor))
     return texto
 
-# --- CARREGAMENTO CENTRALIZADO DE DADOS E EQUIPE ---
+# --- CARREGAMENTO CENTRALIZADO VIA POWER AUTOMATE ---
 @st.cache_data(ttl=300) 
 def carregar_dados_sharepoint():
     try:
@@ -221,7 +238,6 @@ def carregar_dados_sharepoint():
         resposta.raise_for_status()
         
         texto_resposta = resposta.text.strip()
-        
         try:
             dados_json = json.loads(texto_resposta)
         except json.JSONDecodeError as e:
@@ -238,7 +254,6 @@ def carregar_dados_sharepoint():
             return None, None
             
         return pd.DataFrame(proc_list), pd.DataFrame(equipe_list)
-        
     except Exception as e:
         st.error(f"Erro ao carregar dados do SharePoint: {e}")
         return None, None
@@ -253,8 +268,7 @@ if df_original is not None and not df_original.empty:
         cols_norm = {c.lower().replace("_", "").replace(" ", ""): c for c in df_input.columns}
         for cand in candidatas:
             cand_norm = cand.lower().replace("_", "").replace(" ", "")
-            if cand_norm in cols_norm:
-                return cols_norm[cand_norm]
+            if cand_norm in cols_norm: return cols_norm[cand_norm]
         return None
 
     mapeamento_flexivel = {
@@ -286,7 +300,7 @@ if df_original is not None and not df_original.empty:
         'nivel_pontos': ['Nivel_Pontos', 'NIVEL_PONTOS'],
         'lat_auto': ['Lat_Auto', 'LAT_AUTO'],
         'lon_auto': ['Lon_Auto', 'LON_AUTO'],
-        'servidor_laudo': ['SERVIDOR_LAUDO', 'Servidor_Laudo', 'Servidor Laudo', 'SERVIDOR LAUDO', 'Servidor_laudo', 'ANALISTA_LAUDO', 'Analista', 'Servidor']
+        'servidor_laudo': ['SERVIDOR_LAUDO', 'Servidor_Laudo', 'Servidor Laudo', 'SERVIDOR LAUDO', 'ANALISTA_LAUDO', 'Analista']
     }
 
     for col_interna, candidatas in mapeamento_flexivel.items():
@@ -295,131 +309,210 @@ if df_original is not None and not df_original.empty:
         else: df[col_interna] = ""
 
     df = df[~df['processo_sei'].astype(str).str.strip().isin(["", "nan", "None"])].reset_index(drop=True)
-
     df['s_laudo_limpo'] = df['servidor_laudo'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
     df['f_limpo'] = df['fiscal'].astype(str).str.strip().replace({"": "Não Atribuído", "nan": "Não Atribuído", "None": "Não Atribuído", "0": "Não Atribuído"})
 
-    # --- PROCESSAMENTO DA TABELA EQUIPE ---
+    # --- PROCESSAMENTO DA TABELA EQUIPE (DO ARQUIVO RESTRITO) ---
     df_equipe = pd.DataFrame()
     if df_equipe_raw is not None and not df_equipe_raw.empty:
         df_equipe_raw.columns = df_equipe_raw.columns.astype(str).str.strip()
-        c_nome = buscar_coluna_flexivel(df_equipe_raw, ['Nome', 'NOME', 'Servidor', 'Analista', 'Fiscal'])
+        c_nome = buscar_coluna_flexivel(df_equipe_raw, ['Nome', 'NOME', 'Servidor'])
         c_email = buscar_coluna_flexivel(df_equipe_raw, ['E_Mail', 'Email', 'E-mail', 'MAIL'])
-        c_perfil = buscar_coluna_flexivel(df_equipe_raw, ['Perfil', 'PERFIL', 'Funcao', 'Cargo'])
+        c_senha = buscar_coluna_flexivel(df_equipe_raw, ['Senha', 'SENHA', 'Password'])
+        c_status = buscar_coluna_flexivel(df_equipe_raw, ['Status', 'STATUS', 'Situacao'])
+        
+        c_coord = buscar_coluna_flexivel(df_equipe_raw, ['Coordenacao', 'Coordenação', 'Coord'])
+        c_analise = buscar_coluna_flexivel(df_equipe_raw, ['Analise', 'Análise', 'Analise_Tecnica'])
+        c_fisc = buscar_coluna_flexivel(df_equipe_raw, ['Fiscalizacao', 'Fiscalização', 'Fisc'])
+        c_perfil_legado = buscar_coluna_flexivel(df_equipe_raw, ['Perfil', 'PERFIL'])
+
+        nomes = df_equipe_raw[c_nome].astype(str).str.strip() if c_nome else ""
+        emails = df_equipe_raw[c_email].astype(str).str.strip() if c_email else ""
+        senhas = df_equipe_raw[c_senha].astype(str).str.strip() if c_senha else ""
+        statuses = df_equipe_raw[c_status].astype(str).str.strip().str.upper() if c_status else "APROVADO"
+
+        def check_bool(val, perfil_str, tag):
+            if str(val).strip().upper() in ["SIM", "TRUE", "1", "S"]: return True
+            if perfil_str and tag in str(perfil_str).lower(): return True
+            return False
+
+        p_legado = df_equipe_raw[c_perfil_legado].astype(str) if c_perfil_legado else ""
+        is_coord = [check_bool(df_equipe_raw[c_coord].iloc[i] if c_coord else False, p_legado.iloc[i] if c_perfil_legado else "", "coord") for i in range(len(df_equipe_raw))]
+        is_an = [check_bool(df_equipe_raw[c_analise].iloc[i] if c_analise else False, p_legado.iloc[i] if c_perfil_legado else "", "análise") or "tecnica" in str(p_legado.iloc[i] if c_perfil_legado else "").lower() for i in range(len(df_equipe_raw))]
+        is_fi = [check_bool(df_equipe_raw[c_fisc].iloc[i] if c_fisc else False, p_legado.iloc[i] if c_perfil_legado else "", "fisc") for i in range(len(df_equipe_raw))]
 
         df_equipe = pd.DataFrame({
-            'nome': df_equipe_raw[c_nome].astype(str).str.strip() if c_nome else "",
-            'email': df_equipe_raw[c_email].astype(str).str.strip() if c_email else "",
-            'perfil': df_equipe_raw[c_perfil].astype(str).str.strip() if c_perfil else ""
+            'nome': nomes,
+            'email': emails,
+            'senha': senhas,
+            'status': statuses,
+            'is_coordenacao': is_coord,
+            'is_analise': is_an,
+            'is_fiscalizacao': is_fi
         })
         df_equipe = df_equipe[~df_equipe['nome'].isin(["", "nan", "None"])].reset_index(drop=True)
 
     # =========================================================================
-    # 🔒 IDENTIFICAÇÃO E AUTENTICAÇÃO SEGURA HÍBRIDA (SSO + PIN/SENHA)
+    # 🔒 SISTEMA DE LOGIN & CADASTRO DE USUÁRIOS
     # =========================================================================
-    email_usuario_logado = None
+    if "usuario_logado" not in st.session_state:
+        st.session_state["usuario_logado"] = None
 
-    # 1. Tenta capturar o e-mail injetado pelo Streamlit Cloud SSO
-    try:
-        if hasattr(st, "user") and st.user and getattr(st.user, "email", None):
-            val_email = str(st.user.email).strip().lower()
-            if val_email: email_usuario_logado = val_email
-        elif hasattr(st, "experimental_user") and st.experimental_user and getattr(st.experimental_user, "email", None):
-            val_email = str(st.experimental_user.email).strip().lower()
-            if val_email: email_usuario_logado = val_email
-    except Exception:
-        email_usuario_logado = None
+    # TELA DE LOGIN BLOQUEANTE
+    if st.session_state["usuario_logado"] is None:
+        col_esq, col_card, col_dir = st.columns([1, 1.8, 1])
+        with col_card:
+            st.markdown("<h1 style='text-align: center; color: #4E5D30;'>⚖️ FiscFlow — IBAMA</h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: #666;'>Sistema de Gestão de Esteira, Atribuições e Fiscalização</p>", unsafe_allow_html=True)
+            st.write("")
 
-    # 2. Se o SSO automático não forneceu o e-mail, exige E-mail + Senha de Acesso
-    if not email_usuario_logado:
-        if "email_autenticado_sessao" not in st.session_state:
-            st.session_state["email_autenticado_sessao"] = None
+            tab_entrar, tab_cadastrar = st.tabs(["🔑 Entrar no Sistema", "📝 Criar Conta / Solicitar Acesso"])
 
-        if st.session_state["email_autenticado_sessao"]:
-            email_usuario_logado = st.session_state["email_autenticado_sessao"]
-            st.sidebar.success(f"🔒 **Sessão Ativa**\n\n✉️ `{email_usuario_logado}`")
-            if st.sidebar.button("🚪 Sair / Logoff", use_container_width=True):
-                st.session_state["email_autenticado_sessao"] = None
-                st.rerun()
-        else:
-            with st.sidebar.container(border=True):
-                st.markdown("🔑 **Painel de Autenticação**")
-                input_email = st.text_input("👤 E-mail Cadastrado:", placeholder="seu.email@ibama.gov.br").strip().lower()
-                input_senha = st.text_input("🔒 Chave de Acesso (PIN):", type="password")
-                
-                btn_login = st.button("🔓 Entrar no Sistema", use_container_width=True)
+            # --- ABA 1: ENTRAR ---
+            with tab_entrar:
+                with st.form("form_login"):
+                    login_email = st.text_input("E-mail Cadastrado:", placeholder="seu.email@ibama.gov.br").strip().lower()
+                    login_senha = st.text_input("Senha:", type="password")
+                    btn_login = st.form_submit_button("Entrar", use_container_width=True)
 
-                senha_correta = st.secrets.get("senha_acesso", "Ibama2026@FT")
+                    if btn_login:
+                        if not login_email or not login_senha:
+                            st.warning("⚠️ Preencha seu e-mail e senha.")
+                        elif df_equipe.empty:
+                            st.error("Erro: A tabela de equipe não foi carregada do SharePoint.")
+                        else:
+                            # Procura o usuário
+                            match_user = df_equipe[df_equipe['email'].str.lower() == login_email]
+                            if match_user.empty:
+                                st.error("⛔ E-mail não encontrado. Caso seja seu primeiro acesso, solicite seu cadastro na aba ao lado.")
+                            else:
+                                user_data = match_user.iloc[0]
+                                status_u = str(user_data['status']).strip().upper()
+                                
+                                if status_u == "PENDENTE":
+                                    st.warning("⏳ **Solicitação em Análise:** Seu cadastro aguarda aprovação da Coordenação via e-mail.")
+                                elif status_u == "REJEITADO":
+                                    st.error("⛔ Seu acesso não foi autorizado pela Coordenação.")
+                                elif not validar_senha(login_senha, user_data['senha']):
+                                    st.error("⛔ Senha incorreta.")
+                                else:
+                                    st.session_state["usuario_logado"] = {
+                                        "nome": str(user_data['nome']),
+                                        "email": str(user_data['email']),
+                                        "is_coordenacao": bool(user_data['is_coordenacao']),
+                                        "is_analise": bool(user_data['is_analise']),
+                                        "is_fiscalizacao": bool(user_data['is_fiscalizacao'])
+                                    }
+                                    st.success(f"✅ Bem-vindo(a), {user_data['nome']}!")
+                                    st.rerun()
 
-                if btn_login:
-                    if not input_email or not input_senha:
-                        st.error("Preencha o e-mail e a senha.")
-                    elif input_senha != senha_correta:
-                        st.error("⛔ Chave de Acesso incorreta.")
-                    else:
-                        st.session_state["email_autenticado_sessao"] = input_email
-                        st.success("Autenticado com sucesso!")
-                        st.rerun()
+            # --- ABA 2: CADASTRAR NOVO USUÁRIO ---
+            with tab_cadastrar:
+                with st.form("form_cadastro"):
+                    st.caption("Preencha seus dados funcionais. O pedido de acesso será encaminhado para aprovação da Coordenação.")
+                    novo_nome = st.text_input("Nome Completo:", placeholder="Ex: Nome Sobrenome").strip()
+                    novo_email = st.text_input("E-mail Institucional:", placeholder="nome.sobrenome@ibama.gov.br").strip().lower()
+                    nova_senha = st.text_input("Crie uma Senha:", type="password")
+                    confirma_senha = st.text_input("Confirme a Senha:", type="password")
+                    
+                    st.markdown("**Selecione as suas atribuições:**")
+                    cad_analise = st.checkbox("🔬 Análise Técnica (Elaboração de Laudos)", value=True)
+                    cad_fisc = st.checkbox("⚖️ Fiscalização (Lavratura de Autos de Infração)", value=False)
+                    cad_coord = st.checkbox("👑 Coordenação (Gestão macro da Força-Tarefa)", value=False)
 
-    perfil_usuario = "Não Autenticado"
-    nome_usuario = "Usuário Não Identificado"
+                    btn_cadastrar = st.form_submit_button("Solicitar Acesso", use_container_width=True)
 
-    # Função para verificar se o e-mail logado coincide com o cadastro (suporta múltiplos e-mails por célula)
-    def checar_email_cadastrado(email_celula, email_logado):
-        if not email_logado: return False
-        emails = [e.strip().lower() for e in str(email_celula).replace(";", ",").split(",") if e.strip()]
-        return email_logado in emails
+                    if btn_cadastrar:
+                        if not novo_nome or not novo_email or not nova_senha:
+                            st.warning("⚠️ Todos os campos são obrigatórios.")
+                        elif nova_senha != confirma_senha:
+                            st.error("⛔ As senhas digitadas não coincidem.")
+                        elif len(nova_senha) < 4:
+                            st.warning("⚠️ A senha deve conter pelo menos 4 caracteres.")
+                        elif not df_equipe.empty and novo_email in df_equipe['email'].str.lower().values:
+                            st.error("⛔ Este e-mail já possui cadastro. Acesse a aba 'Entrar no Sistema'.")
+                        else:
+                            # A senha é criptografada com PBKDF2-HMAC-SHA256 antes de trafegar
+                            payload_cadastro = {
+                                "acao": "CADASTRAR_USUARIO",
+                                "nome": novo_nome,
+                                "email": novo_email,
+                                "senha": gerar_hash(nova_senha),
+                                "status": "PENDENTE",
+                                "coordenacao": "SIM" if cad_coord else "NÃO",
+                                "analise": "SIM" if cad_analise else "NÃO",
+                                "fiscalizacao": "SIM" if cad_fisc else "NÃO"
+                            }
+                            try:
+                                url_planilha = st.secrets["sharepoint"]["url_planilha"]
+                                with st.spinner("Enviando solicitação para o SharePoint..."):
+                                    resp = requests.post(url_planilha, json=payload_cadastro, headers={"Content-Type": "application/json"})
+                                    resp.raise_for_status()
 
-    # 3. Validação do Perfil contra a Tabela Equipe no SharePoint
-    if email_usuario_logado and not df_equipe.empty:
-        match_u = df_equipe[df_equipe['email'].apply(lambda cell: checar_email_cadastrado(cell, email_usuario_logado))]
-        if not match_u.empty:
-            perfil_usuario = str(match_u.iloc[0]['perfil']).strip()
-            nome_usuario = str(match_u.iloc[0]['nome']).strip()
-        else:
-            perfil_usuario = "Não Cadastrado na Equipe"
-    elif df_equipe.empty:
-        perfil_usuario = "Aba Equipe Não Encontrada"
+                                st.info("📨 **Solicitação enviada com sucesso!**\n\nUm e-mail de autorização foi encaminhado para a Coordenação. Assim que aprovado, você poderá acessar o FiscFlow.")
+                                st.cache_data.clear()
+                            except Exception as e:
+                                st.error(f"Erro ao conectar com o Power Automate: {e}")
 
-    # Permissão estrita: Apenas perfis 'Coordenação' ou 'Admin' acessam o módulo restrito
-    is_coordenador = perfil_usuario.lower() in ["coordenação", "coordenacao", "admin"]
+        st.stop() # Interrompe a execução até que o login ocorra com sucesso
 
-    # --- NAVEGAÇÃO CONDICIONAL ---
+    # =========================================================================
+    # 📱 APLICATIVO AUTENTICADO
+    # =========================================================================
+    user = st.session_state["usuario_logado"]
+    is_coordenador = user["is_coordenacao"]
+    is_analise = user["is_analise"]
+    is_fiscal = user["is_fiscalizacao"]
+
+    st.sidebar.title("📌 FiscFlow")
+    st.sidebar.markdown(f"👤 **{user['nome']}**\n\n✉️ `{user['email']}`")
+    
+    perfis_badges = []
+    if is_coordenador: perfis_badges.append("👑 Coordenação")
+    if is_analise: perfis_badges.append("🔬 Análise")
+    if is_fiscal: perfis_badges.append("⚖️ Fiscal")
+    st.sidebar.caption("Perfis: " + " | ".join(perfis_badges))
+
+    if st.sidebar.button("🚪 Sair / Logoff", use_container_width=True):
+        st.session_state["usuario_logado"] = None
+        st.rerun()
+
+    st.sidebar.markdown("---")
+
+    # Módulos disponíveis de acordo com as permissões do usuário
     modulos_disponiveis = []
-    if is_coordenador: 
-        modulos_disponiveis.append("👑 Coordenação")
-    
-    modulos_disponiveis.extend(["🔬 Análise Técnica", "⚖️ Fiscalização"])
+    if is_coordenador:
+        modulos_disponiveis = ["👑 Coordenação", "🔬 Análise Técnica", "⚖️ Fiscalização"]
+    else:
+        if is_analise: modulos_disponiveis.append("🔬 Análise Técnica")
+        if is_fiscal: modulos_disponiveis.append("⚖️ Fiscalização")
 
-    st.sidebar.title("📌 Navegação")
-    st.sidebar.caption(f"👤 **{nome_usuario}**\n\n🔰 Perfil: `{perfil_usuario}`")
-    
-    if not is_coordenador:
-        st.sidebar.info("💡 Para acessar o módulo de Coordenação, seu e-mail deve estar cadastrado com perfil 'Coordenação' na aba Equipe da planilha.")
+    if not modulos_disponiveis:
+        st.error("Seu usuário não possui nenhum módulo habilitado no momento.")
+        st.stop()
 
     pagina = st.sidebar.radio("Selecione o Módulo:", modulos_disponiveis, index=0)
 
     st.sidebar.markdown("---")
     st.sidebar.header("🔗 Atalhos Rápidos")
     st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
-
     if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
         st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
-
     st.sidebar.markdown("---")
 
     # =========================================================================
-    # 👑 PÁGINA 1: COORDENAÇÃO (EXCLUSIVA PARA PERFIL COORDENAÇÃO)
+    # 👑 MÓDULO 1: COORDENAÇÃO (EXCLUSIVO PARA COORDENADORES)
     # =========================================================================
     if pagina == "👑 Coordenação":
-        if not is_coordenador:
-            st.error("⛔ Acesso Restrito. O módulo de Coordenação é reservado exclusivamente para coordenadores cadastrados na equipe.")
-            st.stop()
-
         st.title("👑 Coordenação — Gestão da Esteira & Distribuição")
-        st.caption("Painel de acompanhamento macro, distribuição de carga e gestão da força-tarefa")
+        st.caption("Painel macro, distribuição de carga ativa e governança da equipe")
 
-        tab_dash, tab_planilha, tab_auto = st.tabs(["📊 Dashboard", "📋 Planilha Geral & Atribuições", "🎲 Atribuição Automática"])
+        tab_dash, tab_planilha, tab_auto, tab_equipe = st.tabs([
+            "📊 Dashboard", 
+            "📋 Planilha Geral & Atribuições", 
+            "🎲 Atribuição Automática",
+            "👥 Gestão da Equipe"
+        ])
 
         # --- ABA 1: DASHBOARD ---
         with tab_dash:
@@ -449,7 +542,7 @@ if df_original is not None and not df_original.empty:
             col_g1, col_g2 = st.columns(2)
 
             with col_g1:
-                st.markdown("### 🔬 Carga por Servidor de Laudo")
+                st.markdown("### 🔬 Carga Ativa por Servidor de Laudo")
                 df_l = df.copy()
                 df_l['is_pendente'] = (df_l['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
                                       (df_l['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
@@ -501,13 +594,7 @@ if df_original is not None and not df_original.empty:
             fig_bacia.update_traces(textposition='outside')
             fig_bacia.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=False, title=None)
             fig_bacia.update_xaxes(showgrid=False)
-            fig_bacia.update_layout(
-                xaxis_title="Bacia Sedimentar", 
-                yaxis_title=None,
-                bargap=0.3,
-                bargroupgap=0.15,
-                margin=dict(l=0, r=0, t=20, b=0)
-            )
+            fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title=None, bargap=0.3, bargroupgap=0.15, margin=dict(l=0, r=0, t=20, b=0))
             st.plotly_chart(fig_bacia, use_container_width=True)
 
         # --- ABA 2: PLANILHA GERAL E ATRIBUIÇÕES ---
@@ -522,10 +609,10 @@ if df_original is not None and not df_original.empty:
                     op_bacia_c = ["Todas"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
                     sel_bacia_c = st.selectbox("Bacia Sedimentar:", op_bacia_c, index=0)
                 with f_col2:
-                    op_serv_c = ["Todos"] + sorted(list(set(df['s_laudo_limpo'].unique().tolist() + (df_equipe['nome'].tolist() if not df_equipe.empty else []))))
+                    op_serv_c = ["Todos"] + sorted(list(set(df['s_laudo_limpo'].unique().tolist() + (df_equipe[df_equipe['is_analise'] == True]['nome'].tolist() if not df_equipe.empty else []))))
                     sel_serv_c = st.selectbox("Servidor Laudo:", op_serv_c, index=0)
                 with f_col3:
-                    op_fisc_c = ["Todos"] + sorted(list(set(df['f_limpo'].unique().tolist() + (df_equipe['nome'].tolist() if not df_equipe.empty else []))))
+                    op_fisc_c = ["Todos"] + sorted(list(set(df['f_limpo'].unique().tolist() + (df_equipe[df_equipe['is_fiscalizacao'] == True]['nome'].tolist() if not df_equipe.empty else []))))
                     sel_fisc_c = st.selectbox("Fiscal Responsável:", op_fisc_c, index=0)
                 with f_col4:
                     op_situ_c = ["Todas"] + sorted(df['situacao'].astype(str).unique())
@@ -544,24 +631,23 @@ if df_original is not None and not df_original.empty:
                 a_col1, a_col2, a_col3, a_col4 = st.columns(4)
                 
                 if not df_equipe.empty:
-                    lista_servidores = sorted(list(set(df_equipe['nome'].tolist() + [s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])))
-                    lista_fiscais = sorted(list(set(df_equipe['nome'].tolist() + [f for f in df['f_limpo'].unique() if f != "Não Atribuído"])))
+                    eq_analise = df_equipe[(df_equipe['is_analise'] == True) & (df_equipe['status'] == 'APROVADO')]['nome'].tolist()
+                    eq_fiscal = df_equipe[(df_equipe['is_fiscalizacao'] == True) & (df_equipe['status'] == 'APROVADO')]['nome'].tolist()
+                    lista_servidores = sorted(list(set(eq_analise + [s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])))
+                    lista_fiscais = sorted(list(set(eq_fiscal + [f for f in df['f_limpo'].unique() if f != "Não Atribuído"])))
                 else:
                     lista_servidores = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
                     lista_fiscais = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
 
                 lista_situacoes = sorted([s for s in df['situacao'].astype(str).unique() if s])
 
-                with a_col1:
-                    novo_servidor = st.selectbox("Atribuir Servidor Laudo:", ["[ Não Alterar ]"] + lista_servidores)
-                with a_col2:
-                    novo_fiscal = st.selectbox("Atribuir Fiscal:", ["[ Não Alterar ]"] + lista_fiscais)
-                with a_col3:
-                    nova_situacao = st.selectbox("Alterar Situação:", ["[ Não Alterar ]"] + lista_situacoes)
+                with a_col1: novo_servidor = st.selectbox("Atribuir Servidor Laudo:", ["[ Não Alterar ]"] + lista_servidores)
+                with a_col2: novo_fiscal = st.selectbox("Atribuir Fiscal:", ["[ Não Alterar ]"] + lista_fiscais)
+                with a_col3: nova_situacao = st.selectbox("Alterar Situação:", ["[ Não Alterar ]"] + lista_situacoes)
                 with a_col4:
                     st.write("")
                     st.write("")
-                    btn_atualizar = st.button("🔄 Aplicar Alterações no SharePoint", use_container_width=True)
+                    btn_atualizar = st.button("🔄 Aplicar no SharePoint", use_container_width=True)
 
             marcar_coord = st.checkbox("✅ Marcar todos os processos visíveis abaixo", value=False)
 
@@ -592,11 +678,10 @@ if df_original is not None and not df_original.empty:
 
             if btn_atualizar:
                 indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
-                
                 if len(indices_marcados) == 0:
-                    st.warning("⚠️ Marque pelo menos um processo na tabela abaixo antes de aplicar as alterações.")
+                    st.warning("⚠️ Marque pelo menos um processo na tabela abaixo.")
                 elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]" and nova_situacao == "[ Não Alterar ]":
-                    st.info("💡 Escolha ao menos uma alteração (Servidor, Fiscal ou Situação) nos menus acima.")
+                    st.info("💡 Escolha ao menos uma alteração nos menus acima.")
                 else:
                     processos_alvo = [str(p) for p in df_coord.iloc[indices_marcados]['processo_sei'].tolist()]
                     ids_alvo = [str(i) for i in df_coord.iloc[indices_marcados]['num_doc'].tolist()]
@@ -610,8 +695,8 @@ if df_original is not None and not df_original.empty:
                         "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else ""
                     }
 
-                    url_planilha = st.secrets["sharepoint"]["url_planilha"]
                     try:
+                        url_planilha = st.secrets["sharepoint"]["url_planilha"]
                         with st.spinner("Atualizando registros no SharePoint..."):
                             resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
                             resp.raise_for_status()
@@ -619,19 +704,18 @@ if df_original is not None and not df_original.empty:
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erro ao enviar atualização para o Power Automate: {e}")
+                        st.error(f"Erro ao enviar atualização: {e}")
 
         # --- ABA 3: ATRIBUIÇÃO AUTOMÁTICA BALANCEADA ---
         with tab_auto:
             st.markdown("### 🎲 Sorteio e Distribuição Automática de Processos")
-            st.caption("Distribuição imparcial e balanceada considerando a carga ativa em aberto de cada servidor")
+            st.caption("Distribuição balanceada considerando a carga ativa em aberto de cada servidor")
 
             col_a1, col_a2 = st.columns(2)
 
             with col_a1:
                 st.markdown("**1. Parâmetros da Demanda**")
                 tipo_tarefa = st.radio("Selecione a Tarefa a Distribuir:", ["Elaboração de Laudo (Análise Técnica)", "Lavratura de Auto (Fiscalização)"])
-                
                 bacias_disp = ["Todas as Bacias"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
                 bacia_alvo = st.selectbox("Filtrar Bacia Sedimentar:", bacias_disp)
 
@@ -644,31 +728,23 @@ if df_original is not None and not df_original.empty:
                     df_pend = df_pend[df_pend['bacia'].astype(str) == bacia_alvo]
 
                 qtd_disponivel = len(df_pend)
-                st.info(f"📌 Processos pendentes encontrados para essa regra: **{qtd_disponivel}**")
-
-                qtd_distribuir = st.number_input("Quantidade de processos a atribuir nesta rodada:", min_value=1, max_value=max(1, qtd_disponivel), value=min(5, max(1, qtd_disponivel)))
+                st.info(f"📌 Processos pendentes encontrados: **{qtd_disponivel}**")
+                qtd_distribuir = st.number_input("Quantidade de processos a atribuir:", min_value=1, max_value=max(1, qtd_disponivel), value=min(5, max(1, qtd_disponivel)))
 
             with col_a2:
-                st.markdown("**2. Equipe Elegível (Servidores Cadastrados)**")
-                
+                st.markdown("**2. Equipe Elegível Habilitada**")
                 if not df_equipe.empty:
                     if "Laudo" in tipo_tarefa:
-                        mask_laudo = df_equipe['perfil'].str.lower().str.contains("análise|tecnica|laudo|coord", na=False)
-                        eq_filtrada = df_equipe[mask_laudo]
-                        if eq_filtrada.empty: eq_filtrada = df_equipe
-                        servidores_base = sorted(eq_filtrada['nome'].unique().tolist())
+                        servidores_base = sorted(df_equipe[(df_equipe['is_analise'] == True) & (df_equipe['status'] == 'APROVADO')]['nome'].unique().tolist())
                     else:
-                        mask_fisc = df_equipe['perfil'].str.lower().str.contains("fisc|coord", na=False)
-                        eq_filtrada = df_equipe[mask_fisc]
-                        if eq_filtrada.empty: eq_filtrada = df_equipe
-                        servidores_base = sorted(eq_filtrada['nome'].unique().tolist())
+                        servidores_base = sorted(df_equipe[(df_equipe['is_fiscalizacao'] == True) & (df_equipe['status'] == 'APROVADO')]['nome'].unique().tolist())
                 else:
                     if "Laudo" in tipo_tarefa:
                         servidores_base = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
                     else:
                         servidores_base = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
 
-                servidores_selecionados = st.multiselect("Selecione os servidores que participarão do sorteio:", servidores_base, default=servidores_base)
+                servidores_selecionados = st.multiselect("Servidores que participarão do sorteio:", servidores_base, default=servidores_base)
 
             st.write("---")
 
@@ -676,90 +752,84 @@ if df_original is not None and not df_original.empty:
                 if qtd_disponivel == 0:
                     st.error("Não há processos pendentes disponíveis para os critérios selecionados.")
                 elif not servidores_selecionados:
-                    st.error("Selecione pelo menos um servidor elegível para receber atribuições.")
+                    st.error("Selecione pelo menos um servidor habilitado.")
                 else:
                     df_alvo_dist = df_pend.head(qtd_distribuir).copy()
                     
+                    # Cálculo de carga ativa (processos pendentes sob responsabilidade)
                     if "Laudo" in tipo_tarefa:
-                        cargas = {}
-                        for s in servidores_selecionados:
-                            mask_s = (df['s_laudo_limpo'] == s) & \
-                                     (df['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
-                                     (df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
-                            cargas[s] = len(df[mask_s])
+                        cargas = {s: len(df[(df['s_laudo_limpo'] == s) & (df['situacao'].str.strip().str.lower() == 'fazer laudo') & (df['laudo_sei'].isin(["", "nan", "None", "0"]))]) for s in servidores_selecionados}
                     else:
-                        cargas = {}
-                        for s in servidores_selecionados:
-                            mask_f = (df['f_limpo'] == s) & \
-                                     (df['situacao'].astype(str).str.strip().str.lower() == 'autuar') & \
-                                     (df['auto'].astype(str).str.strip().isin(["", "nan", "None", "0", "processo não encontrado"]))
-                            cargas[s] = len(df[mask_f])
+                        cargas = {s: len(df[(df['f_limpo'] == s) & (df['situacao'].str.strip().str.lower() == 'autuar') & (df['auto'].isin(["", "nan", "None", "0", "processo não encontrado"]))]) for s in servidores_selecionados}
 
                     atribuicoes_resultado = []
-
                     for _, row in df_alvo_dist.iterrows():
                         menor_c = min(cargas.values())
-                        candidatos_menor_carga = [s for s, c in cargas.items() if c == menor_c]
-                        
-                        escolhido = random.choice(candidatos_menor_carga)
+                        candidatos = [s for s, c in cargas.items() if c == menor_c]
+                        escolhido = random.choice(candidatos)
                         cargas[escolhido] += 1
                         atribuicoes_resultado.append(escolhido)
 
                     df_alvo_dist['Novo_Responsavel'] = atribuicoes_resultado
-
-                    st.session_state['resultado_distribuicao'] = {
-                        "df": df_alvo_dist,
-                        "tipo": tipo_tarefa
-                    }
+                    st.session_state['resultado_distribuicao'] = {"df": df_alvo_dist, "tipo": tipo_tarefa}
 
             if 'resultado_distribuicao' in st.session_state:
                 res = st.session_state['resultado_distribuicao']
                 df_res = res['df']
                 tipo_t = res['tipo']
 
-                st.markdown("### 📋 Prévia da Distribuição Gerada")
-                
-                df_previa_exib = pd.DataFrame({
+                st.markdown("### 📋 Prévia da Distribuição")
+                st.dataframe(pd.DataFrame({
                     "ID": df_res['num_doc'].astype(str),
                     "Processo SEI": df_res['processo_sei'].astype(str),
                     "Bacia": df_res['bacia'].astype(str),
                     "Empresa": df_res['empresa'].astype(str),
-                    "Situação Atual": df_res['situacao'].astype(str),
                     "Novo Responsável Sorteado": df_res['Novo_Responsavel'].astype(str)
-                })
+                }), hide_index=True, use_container_width=True)
 
-                st.dataframe(df_previa_exib, hide_index=True, use_container_width=True)
-
-                if st.button("🚀 Confirmar e Gravar Atribuições Automáticas no SharePoint", use_container_width=True):
+                if st.button("🚀 Confirmar e Gravar Atribuições no SharePoint", use_container_width=True):
                     processos_alvo = [str(p) for p in df_res['processo_sei'].tolist()]
                     ids_alvo = [str(i) for i in df_res['num_doc'].tolist()]
 
                     for idx, row_dist in df_res.iterrows():
                         resp_sorteado = str(row_dist['Novo_Responsavel'])
-                        pid = str(row_dist['num_doc'])
-                        psei = str(row_dist['processo_sei'])
-
                         payload_single = {
                             "acao": "ATUALIZAR",
-                            "processos_sei": [psei],
-                            "ids": [pid],
+                            "processos_sei": [str(row_dist['processo_sei'])],
+                            "ids": [str(row_dist['num_doc'])],
                             "novo_servidor_laudo": resp_sorteado if "Laudo" in tipo_t else "",
                             "novo_fiscal": resp_sorteado if "Auto" in tipo_t else "",
                             "nova_situacao": ""
                         }
-
-                        url_planilha = st.secrets["sharepoint"]["url_planilha"]
                         try:
-                            requests.post(url_planilha, json=payload_single, headers={"Content-Type": "application/json"})
+                            requests.post(st.secrets["sharepoint"]["url_planilha"], json=payload_single, headers={"Content-Type": "application/json"})
                         except: pass
 
-                    st.success(f"✅ Sucesso! {len(processos_alvo)} processos foram atribuídos e gravados no SharePoint!")
+                    st.success(f"✅ {len(processos_alvo)} processos gravados com sucesso!")
                     del st.session_state['resultado_distribuicao']
                     st.cache_data.clear()
                     st.rerun()
 
+        # --- ABA 4: GESTÃO DA EQUIPE ---
+        with tab_equipe:
+            st.markdown("### 👥 Integrantes da Força-Tarefa")
+            st.caption("Visualização das permissões dos servidores (as senhas não são exibidas)")
+            
+            if not df_equipe.empty:
+                df_eq_view = pd.DataFrame({
+                    "Nome": df_equipe['nome'],
+                    "E-mail": df_equipe['email'],
+                    "Status": df_equipe['status'],
+                    "Coordenação": df_equipe['is_coordenacao'].apply(lambda x: "SIM" if x else "NÃO"),
+                    "Análise Técnica": df_equipe['is_analise'].apply(lambda x: "SIM" if x else "NÃO"),
+                    "Fiscalização": df_equipe['is_fiscalizacao'].apply(lambda x: "SIM" if x else "NÃO"),
+                })
+                st.dataframe(df_eq_view, hide_index=True, use_container_width=True)
+            else:
+                st.info("Nenhum integrante cadastrado na tabela Equipe.")
+
     # =========================================================================
-    # 🔬 PÁGINA 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
+    # 🔬 MÓDULO 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
     # =========================================================================
     elif pagina == "🔬 Análise Técnica":
         st.title("🔬 Análise Técnica — Instrução de Laudos")
@@ -799,7 +869,6 @@ if df_original is not None and not df_original.empty:
         if apenas_pendentes: df_laudo = df_laudo[df_laudo['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
             
         df_laudo = df_laudo.reset_index(drop=True)
-        
         st.markdown(f"### 📋 Processos em Análise Técnica ({len(df_laudo)} encontrados)")
         
         df_laudo_exib = pd.DataFrame({
@@ -817,11 +886,10 @@ if df_original is not None and not df_original.empty:
             "Risco": df_laudo['class_risco'].astype(str),
             "Fiscal Responsável": df_laudo['f_limpo'].astype(str)
         })
-        
         st.dataframe(df_laudo_exib, hide_index=True, use_container_width=True)
 
     # =========================================================================
-    # ⚖️ PÁGINA 3: FISCALIZAÇÃO (AUTUAÇÃO & MINUTAS)
+    # ⚖️ MÓDULO 3: FISCALIZAÇÃO (AUTUAÇÃO & MINUTAS)
     # =========================================================================
     elif pagina == "⚖️ Fiscalização":
         st.title("🔄 FiscFlow — Módulo de Fiscalização")
@@ -871,7 +939,6 @@ if df_original is not None and not df_original.empty:
         if not todos_laudos: df_f = df_f[~df_f['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
 
         df_f = df_f.reset_index(drop=True)
-
         st.markdown("### 📋 Processos para Análise")
         
         marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
