@@ -1,7 +1,3 @@
-Aqui está o **`README.md`** completo e atualizado, contemplando todas as novas funcionalidades implementadas hoje: o **fluxo bidirecional do Power Automate** (Leitura e Atualização), o **mecanismo híbrido de autenticação e controle de acesso por perfil**, a **aba de gestão da equipe**, e o **algoritmo de distribuição automática balanceada de carga**.
-
----
-
 # ⚖️ FiscFlow — IBAMA: Gestão de Esteira, Atribuição Automática e Automação de Relatórios
 
 Aplicativo web desenvolvido em **Streamlit** para acompanhamento macro de processos, distribuição automática balanceada de carga de trabalho, gestão de atribuições e geração em lote de **Relatórios de Fiscalização** em formato Word (`.docx`), integrado de forma bidirecional ao **SharePoint via Power Automate**.
