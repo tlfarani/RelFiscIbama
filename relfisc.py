@@ -268,16 +268,9 @@ def carregar_dados_sharepoint():
 
 df_original, df_equipe_raw = carregar_dados_sharepoint()
 
-# --- DIAGNÓSTICO EM TEMPO REAL NA BARRA LATERAL --- Exibe diagnóstico técnico exclusivamente para a Coordenação
-if is_coordenador:
-        with st.sidebar.expander("🛠️ Diagnóstico da Conexão", expanded=False):
-            qtd_proc_bruta = len(df_original) if df_original is not None else 0
-            qtd_eq_bruta = len(df_equipe_raw) if df_equipe_raw is not None else 0
-            st.caption("Visível apenas para Coordenação:")
-            st.write(f"📦 Linhas brutas em Processos: **{qtd_proc_bruta}**")
-            st.write(f"👥 Linhas brutas em Equipe: **{qtd_eq_bruta}**")
-            if df_original is not None and not df_original.empty:
-                st.write("Colunas detectadas em Processos:", list(df_original.columns))
+if df_original is not None and not df_original.empty:
+    df = df_original.copy()
+    df.columns = df.columns.astype(str).str.strip()
 
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
@@ -485,6 +478,17 @@ if df_original is not None and not df_original.empty:
 
     st.sidebar.title("📌 FiscFlow")
     st.sidebar.markdown(f"👤 **{user['nome']}**\n\n✉️ `{user['email']}`")
+
+    # --- DIAGNÓSTICO TÉCNICO (EXCLUSIVO PARA COORDENAÇÃO) ---
+    if is_coordenador:
+        with st.sidebar.expander("🛠️ Diagnóstico da Conexão", expanded=False):
+            qtd_proc_bruta = len(df_original) if df_original is not None else 0
+            qtd_eq_bruta = len(df_equipe_raw) if df_equipe_raw is not None else 0
+            st.caption("Visível apenas para Coordenação:")
+            st.write(f"📦 Linhas brutas em Processos: **{qtd_proc_bruta}**")
+            st.write(f"👥 Linhas brutas em Equipe: **{qtd_eq_bruta}**")
+            if df_original is not None and not df_original.empty:
+                st.write("Colunas detectadas em Processos:", list(df_original.columns))
     
     perfis_badges = []
     if is_coordenador: perfis_badges.append("👑 Coordenação")
