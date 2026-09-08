@@ -272,10 +272,6 @@ if df_original is not None and not df_original.empty:
     df = df_original.copy()
     df.columns = df.columns.astype(str).str.strip()
 
-if df_original is not None and not df_original.empty:
-    df = df_original.copy()
-    df.columns = df.columns.astype(str).str.strip()
-
     def buscar_coluna_flexivel(df_input, candidatas):
         cols_norm = {c.lower().replace("_", "").replace(" ", ""): c for c in df_input.columns}
         for cand in candidatas:
@@ -965,39 +961,42 @@ if df_original is not None and not df_original.empty:
         if not todos_laudos: df_f = df_f[~df_f['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])]
 
         df_f = df_f.reset_index(drop=True)
+        
         st.markdown("### 📋 Processos para Análise")
         
         marcar_todos = st.checkbox("✅ Marcar todos os processos mostrados abaixo", value=False)
-        vetor_selecao_inicial = [marcar_todos] * len(df_f)
 
-        df_exib = pd.DataFrame({
-            "Selecionar": vetor_selecao_inicial,
-            "ID": df_f['num_doc'].astype(str),
-            "SITUAÇÃO": df_f['situacao'].astype(str),
-            "Fiscal": df_f['f_limpo'].astype(str),
-            "Data": [converter_data_excel(d) for d in df_f['data_acid']],
-            "Produto": df_f['produto'].astype(str),
-            "Class OL": df_f['class_ol'].astype(str),
-            "Risco": df_f['class_risco'].astype(str),
-            "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
-            "Multa Prev": df_f['multa_prevista'].astype(str),
-            "Lat Auto": df_f['lat_auto'].astype(str),
-            "Lon Auto": df_f['lon_auto'].astype(str)
-        })
+        if df_f.empty:
+            st.warning("⚠️ Nenhum processo encontrado para os filtros selecionados.")
+        else:
+            df_exib = pd.DataFrame({
+                "Selecionar": pd.Series([marcar_todos] * len(df_f), dtype=bool),
+                "ID": df_f['num_doc'].astype(str),
+                "SITUAÇÃO": df_f['situacao'].astype(str),
+                "Fiscal": df_f['f_limpo'].astype(str),
+                "Data": [converter_data_excel(d) for d in df_f['data_acid']],
+                "Produto": df_f['produto'].astype(str),
+                "Class OL": df_f['class_ol'].astype(str),
+                "Risco": df_f['class_risco'].astype(str),
+                "Vol (m³)": [extrair_volume_texto(v) for v in df_f['vol_char']],
+                "Multa Prev": df_f['multa_prevista'].astype(str),
+                "Lat Auto": df_f['lat_auto'].astype(str),
+                "Lon Auto": df_f['lon_auto'].astype(str)
+            })
 
-        tabela_editada = st.data_editor(
-            df_exib,
-            hide_index=True,
-            use_container_width=True,
-            disabled=[col for col in df_exib.columns if col != "Selecionar"],
-            column_config={"Selecionar": st.column_config.CheckboxColumn("Selecionar")},
-            key=f"editor_{marcar_todos}"
-        )
-        
-        indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
-        selecionados = df_f.iloc[indices_selecionados]
+            tabela_editada = st.data_editor(
+                df_exib,
+                hide_index=True,
+                use_container_width=True,
+                disabled=[col for col in df_exib.columns if col != "Selecionar"],
+                column_config={"Selecionar": st.column_config.CheckboxColumn("Selecionar")},
+                key=f"editor_{marcar_todos}"
+            )
+            
+            indices_selecionados = tabela_editada[tabela_editada["Selecionar"] == True].index
+            selecionados = df_f.iloc[indices_selecionados]
 
-        if not selecionados.empty:
+            if not selecionados.empty:
             st.write("---")
             st.subheader(f"🚀 Geração em Lote ({len(selecionados)} itens)")
             
