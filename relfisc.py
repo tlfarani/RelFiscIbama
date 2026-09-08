@@ -268,6 +268,15 @@ def carregar_dados_sharepoint():
 
 df_original, df_equipe_raw = carregar_dados_sharepoint()
 
+# --- DIAGNÓSTICO EM TEMPO REAL NA BARRA LATERAL ---
+with st.sidebar.expander("🛠️ Diagnóstico da Conexão", expanded=False):
+    qtd_proc_bruta = len(df_original) if df_original is not None else 0
+    qtd_eq_bruta = len(df_equipe_raw) if df_equipe_raw is not None else 0
+    st.write(f"📦 Linhas brutas em Processos: **{qtd_proc_bruta}**")
+    st.write(f"👥 Linhas brutas em Equipe: **{qtd_eq_bruta}**")
+    if df_original is not None and not df_original.empty:
+        st.write("Colunas detectadas em Processos:", list(df_original.columns))
+
 if df_original is not None and not df_original.empty:
     df = df_original.copy()
     df.columns = df.columns.astype(str).str.strip()
@@ -281,7 +290,7 @@ if df_original is not None and not df_original.empty:
 
     mapeamento_flexivel = {
         'num_doc': ['ID', 'Num_Doc', 'NUM_DOC'],
-        'processo_sei': ['PROCESSO', 'Processo', 'PROCESSO_SEI'],
+        'processo_sei': ['PROCESSO', 'Processo', 'PROCESSO_SEI', 'Processo_SEI', 'Processo SEI', 'N_PROCESSO', 'NUM_PROCESSO'],
         'siema': ['SIEMA', 'Siema'],
         'situacao': ['SITUACAO', 'Situacao', 'Situação'],
         'laudo_sei': ['LAUDO_SEI', 'Laudo_SEI', 'LAUDO', 'Laudo'],
@@ -659,60 +668,63 @@ if df_original is not None and not df_original.empty:
 
             marcar_coord = st.checkbox("✅ Marcar todos os processos visíveis abaixo", value=False)
 
-            df_coord_exib = pd.DataFrame({
-                "Selecionar": [marcar_coord] * len(df_coord),
-                "ID": df_coord['num_doc'].astype(str),
-                "PROCESSO": df_coord['processo_sei'].astype(str),
-                "SITUAÇÃO": df_coord['situacao'].astype(str),
-                "Servidor Laudo": df_coord['s_laudo_limpo'].astype(str),
-                "Fiscal": df_coord['f_limpo'].astype(str),
-                "Bacia": df_coord['bacia'].astype(str),
-                "Empresa": df_coord['empresa'].astype(str),
-                "Instalação": df_coord['instalacao'].astype(str),
-                "Produto": df_coord['produto'].astype(str),
-                "Vol (m³)": [extrair_volume_texto(v) for v in df_coord['vol_char']],
-                "Laudo SEI": df_coord['laudo_sei'].astype(str),
-                "Auto Infração": df_coord['auto'].astype(str)
-            })
+            if df_coord.empty:
+                st.warning("⚠️ Nenhum processo encontrado para os filtros selecionados ou a base de processos retornou vazia.")
+            else:
+                df_coord_exib = pd.DataFrame({
+                    "Selecionar": pd.Series([marcar_coord] * len(df_coord), dtype=bool),
+                    "ID": df_coord['num_doc'].astype(str),
+                    "PROCESSO": df_coord['processo_sei'].astype(str),
+                    "SITUAÇÃO": df_coord['situacao'].astype(str),
+                    "Servidor Laudo": df_coord['s_laudo_limpo'].astype(str),
+                    "Fiscal": df_coord['f_limpo'].astype(str),
+                    "Bacia": df_coord['bacia'].astype(str),
+                    "Empresa": df_coord['empresa'].astype(str),
+                    "Instalação": df_coord['instalacao'].astype(str),
+                    "Produto": df_coord['produto'].astype(str),
+                    "Vol (m³)": [extrair_volume_texto(v) for v in df_coord['vol_char']],
+                    "Laudo SEI": df_coord['laudo_sei'].astype(str),
+                    "Auto Infração": df_coord['auto'].astype(str)
+                })
 
-            tabela_coord_editada = st.data_editor(
-                df_coord_exib,
-                hide_index=True,
-                use_container_width=True,
-                disabled=[col for col in df_coord_exib.columns if col != "Selecionar"],
-                column_config={"Selecionar": st.column_config.CheckboxColumn("Selecionar")},
-                key=f"editor_coord_{marcar_coord}"
-            )
+                tabela_coord_editada = st.data_editor(
+                    df_coord_exib,
+                    hide_index=True,
+                    use_container_width=True,
+                    disabled=[col for col in df_coord_exib.columns if col != "Selecionar"],
+                    column_config={"Selecionar": st.column_config.CheckboxColumn("Selecionar")},
+                    key=f"editor_coord_{marcar_coord}"
+                )
 
-            if btn_atualizar:
-                indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
-                if len(indices_marcados) == 0:
-                    st.warning("⚠️ Marque pelo menos um processo na tabela abaixo.")
-                elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]" and nova_situacao == "[ Não Alterar ]":
-                    st.info("💡 Escolha ao menos uma alteração nos menus acima.")
-                else:
-                    processos_alvo = [str(p) for p in df_coord.iloc[indices_marcados]['processo_sei'].tolist()]
-                    ids_alvo = [str(i) for i in df_coord.iloc[indices_marcados]['num_doc'].tolist()]
+                if btn_atualizar:
+                    indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
+                    if len(indices_marcados) == 0:
+                        st.warning("⚠️ Marque pelo menos um processo na tabela abaixo.")
+                    elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]" and nova_situacao == "[ Não Alterar ]":
+                        st.info("💡 Escolha ao menos uma alteração nos menus acima.")
+                    else:
+                        processos_alvo = [str(p) for p in df_coord.iloc[indices_marcados]['processo_sei'].tolist()]
+                        ids_alvo = [str(i) for i in df_coord.iloc[indices_marcados]['num_doc'].tolist()]
 
-                    payload_atualizacao = {
-                        "acao": "ATUALIZAR",
-                        "processos_sei": processos_alvo,
-                        "ids": ids_alvo,
-                        "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else "",
-                        "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else "",
-                        "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else ""
-                    }
+                        payload_atualizacao = {
+                            "acao": "ATUALIZAR",
+                            "processos_sei": processos_alvo,
+                            "ids": ids_alvo,
+                            "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else "",
+                            "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else "",
+                            "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else ""
+                        }
 
-                    try:
-                        url_planilha = st.secrets["sharepoint"]["url_planilha"]
-                        with st.spinner("Atualizando registros no SharePoint..."):
-                            resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
-                            resp.raise_for_status()
-                        st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao enviar atualização: {e}")
+                        try:
+                            url_planilha = st.secrets["sharepoint"]["url_planilha"]
+                            with st.spinner("Atualizando registros no SharePoint..."):
+                                resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
+                                resp.raise_for_status()
+                            st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao enviar atualização: {e}")
 
         # --- ABA 3: ATRIBUIÇÃO AUTOMÁTICA BALANCEADA ---
         with tab_auto:
