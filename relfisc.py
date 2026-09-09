@@ -13,6 +13,9 @@ import secrets
 from datetime import datetime, timedelta
 import plotly.express as px
 
+# Link do Gem para Busca e Geração de Laudos
+URL_GEM_LAUDOS = "https://gemini.google.com/gem/1XBQ7DusiR4FVe0zM1VzSJgLrsax9znTs?usp=sharing"
+
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
     page_title="FiscFlow — IBAMA", 
@@ -514,6 +517,7 @@ if df_original is not None and not df_original.empty:
 
     st.sidebar.markdown("---")
     st.sidebar.header("🔗 Atalhos Rápidos")
+    st.sidebar.link_button("✨ Gem — Busca & Laudos SEI", URL_GEM_LAUDOS)
     st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
     if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
         st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
@@ -854,8 +858,13 @@ if df_original is not None and not df_original.empty:
     # 🔬 MÓDULO 2: ANÁLISE TÉCNICA (INSTRUÇÃO DE LAUDOS)
     # =========================================================================
     elif pagina == "🔬 Análise Técnica":
-        st.title("🔬 Análise Técnica — Instrução de Laudos")
-        st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
+        col_tit, col_btn = st.columns([2.3, 1.2])
+        with col_tit:
+            st.title("🔬 Análise Técnica — Instrução de Laudos")
+            st.caption("Acompanhamento da elaboração de laudos técnicos e consolidação de evidências")
+        with col_btn:
+            st.write("")
+            st.link_button("✨ Assistente Gem (Laudos & SEI)", URL_GEM_LAUDOS, use_container_width=True)
         
         with st.container(border=True):
             st.markdown("**🔍 Painel de Filtros — Análise Técnica**")
