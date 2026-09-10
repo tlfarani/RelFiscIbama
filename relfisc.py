@@ -518,11 +518,11 @@ if df_original is not None and not df_original.empty:
 
     st.sidebar.markdown("---")
     st.sidebar.header("🔗 Atalhos Rápidos")
-    st.sidebar.link_button("📑 Buscador Laudos & Modelos", URL_BUSCADOR_LAUDOS)
-    st.sidebar.link_button("✨ Gem — Busca & Laudos SEI", URL_GEM_LAUDOS)
-    st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
     if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
         st.sidebar.link_button("📊 Planilha de Controle", st.secrets["sharepoint"]["url_visualizacao"])
+    st.sidebar.link_button("📑 Buscador Laudos & Modelos", URL_BUSCADOR_LAUDOS)
+    st.sidebar.link_button("✨ Gem — Busca & Laudos SEI", URL_GEM_LAUDOS)
+    st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")    
     st.sidebar.markdown("---")
 
     # =========================================================================
