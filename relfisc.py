@@ -15,6 +15,7 @@ import plotly.express as px
 
 # Link do Gem para Busca e Geração de Laudos
 URL_GEM_LAUDOS = "https://gemini.google.com/gem/1XBQ7DusiR4FVe0zM1VzSJgLrsax9znTs?usp=sharing"
+URL_BUSCADOR_LAUDOS = "https://ibamagovbr.sharepoint.com/:x:/s/ForaTarefaPlataformasdePetrleo/IQCOkZltEpUKQ65xVFTNxS44AaQm0srAWhNuBkYu2RFpOKc?e=yE0Kfg"
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -517,6 +518,7 @@ if df_original is not None and not df_original.empty:
 
     st.sidebar.markdown("---")
     st.sidebar.header("🔗 Atalhos Rápidos")
+    st.sidebar.link_button("📑 Buscador Laudos & Modelos", URL_BUSCADOR_LAUDOS)
     st.sidebar.link_button("✨ Gem — Busca & Laudos SEI", URL_GEM_LAUDOS)
     st.sidebar.link_button("⚓ Acessar ProMar", "https://promar.streamlit.app/")
     if "sharepoint" in st.secrets and "url_visualizacao" in st.secrets["sharepoint"]:
