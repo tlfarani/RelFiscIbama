@@ -502,10 +502,11 @@ if df_original is not None and not df_original.empty:
 
     st.sidebar.markdown("---")
 
-    # Módulos disponíveis de acordo com as permissões do usuário
-    modulos_disponiveis = []
+    # Módulos disponíveis: Dashboard aberto a todos; demais condicionados ao perfil
+    modulos_disponiveis = ["📊 Dashboard"]
+    
     if is_coordenador:
-        modulos_disponiveis = ["👑 Coordenação", "🔬 Análise Técnica", "⚖️ Fiscalização"]
+        modulos_disponiveis.extend(["👑 Coordenação", "🔬 Análise Técnica", "⚖️ Fiscalização"])
     else:
         if is_analise: modulos_disponiveis.append("🔬 Análise Técnica")
         if is_fiscal: modulos_disponiveis.append("⚖️ Fiscalização")
@@ -526,104 +527,108 @@ if df_original is not None and not df_original.empty:
     st.sidebar.markdown("---")
 
     # =========================================================================
+    # 📊 MÓDULO GERAL: DASHBOARD (ACESSO ABERTO A TODOS OS USUÁRIOS)
+    # =========================================================================
+    if pagina == "📊 Dashboard":
+        st.title("📊 Dashboard — Visão Geral da Força-Tarefa")
+        st.caption("Painel macro, indicadores de esteira e distribuição de carga ativa")
+
+        tot_ft = len(df)
+        laudo_vazio = df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])
+        pend_laudo = len(df[laudo_vazio])
+        
+        situ_s = df['situacao'].astype(str).str.strip().str.lower()
+        auto_s = df['auto'].astype(str).str.strip()
+        
+        is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
+        is_ai = situ_s == 'processo ai gerado'
+        
+        pend_auto = len(df[(~laudo_vazio) & (~is_auto)])
+        pend_proc_ai = len(df[is_auto & (~is_ai)])
+        concluidos = len(df[is_ai])
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total de Processos FT", tot_ft)
+        c2.metric("Pendentes de Laudo", pend_laudo)
+        c3.metric("Pendentes de Auto", pend_auto)
+        c4.metric("Pendentes Proc. AI", pend_proc_ai)
+        c5.metric("Proc. AI Gerados", concluidos)
+
+        st.write("---")
+
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            st.markdown("### 🔬 Carga Ativa por Servidor de Laudo")
+            df_l = df.copy()
+            df_l['is_pendente'] = (df_l['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
+                                  (df_l['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
+            df_l['Status_Laudo'] = df_l['is_pendente'].apply(lambda x: 'Pendente (Fazer Laudo)' if x else 'Concluído')
+            df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
+            
+            fig_laudo = px.bar(
+                df_l_g, 
+                y='s_laudo_limpo', 
+                x='Quantidade', 
+                color='Status_Laudo',
+                orientation='h',
+                text_auto=True,
+                color_discrete_map={'Pendente (Fazer Laudo)': '#EAB308', 'Concluído': '#4E5D30'}
+            )
+            fig_laudo.update_traces(textposition='auto')
+            fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
+            st.plotly_chart(fig_laudo, use_container_width=True)
+
+        with col_g2:
+            st.markdown("### ⚖️ Carga por Fiscal Responsável")
+            df_fisc = df.copy()
+            df_f_g = df_fisc.groupby(['f_limpo', 'situacao']).size().reset_index(name='Quantidade')
+            
+            fig_fisc = px.bar(
+                df_f_g, 
+                y='f_limpo', 
+                x='Quantidade', 
+                color='situacao',
+                orientation='h',
+                text_auto=True
+            )
+            fig_fisc.update_traces(textposition='auto')
+            fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
+            st.plotly_chart(fig_fisc, use_container_width=True)
+
+        st.write("---")
+
+        st.markdown("### 🌊 Distribuição de Processos por Bacia Sedimentar")
+        df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
+        fig_bacia = px.bar(
+            df_bacia, 
+            x='bacia', 
+            y='Quantidade', 
+            color='situacao', 
+            barmode='group',
+            text_auto=True
+        )
+        fig_bacia.update_traces(textposition='outside')
+        fig_bacia.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=False, title=None)
+        fig_bacia.update_xaxes(showgrid=False)
+        fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title=None, bargap=0.3, bargroupgap=0.15, margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig_bacia, use_container_width=True)
+
+    # =========================================================================
     # 👑 MÓDULO 1: COORDENAÇÃO (EXCLUSIVO PARA COORDENADORES)
     # =========================================================================
-    if pagina == "👑 Coordenação":
+    elif pagina == "👑 Coordenação":
         st.title("👑 Coordenação — Gestão da Esteira & Distribuição")
         st.caption("Painel macro, distribuição de carga ativa e governança da equipe")
 
-        tab_dash, tab_planilha, tab_auto, tab_equipe = st.tabs([
-            "📊 Dashboard", 
+        tab_planilha, tab_auto, tab_equipe = st.tabs([
             "📋 Planilha Geral & Atribuições", 
             "🎲 Atribuição Automática",
             "👥 Gestão da Equipe"
         ])
 
-        # --- ABA 1: DASHBOARD ---
-        with tab_dash:
-            tot_ft = len(df)
-            laudo_vazio = df['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None"])
-            pend_laudo = len(df[laudo_vazio])
-            
-            situ_s = df['situacao'].astype(str).str.strip().str.lower()
-            auto_s = df['auto'].astype(str).str.strip()
-            
-            is_auto = (situ_s == 'auto lavrado') | (~auto_s.isin(["", "nan", "none", "0", "processo não encontrado"]))
-            is_ai = situ_s == 'processo ai gerado'
-            
-            pend_auto = len(df[(~laudo_vazio) & (~is_auto)])
-            pend_proc_ai = len(df[is_auto & (~is_ai)])
-            concluidos = len(df[is_ai])
-
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Total de Processos FT", tot_ft)
-            c2.metric("Pendentes de Laudo", pend_laudo)
-            c3.metric("Pendentes de Auto", pend_auto)
-            c4.metric("Pendentes Proc. AI", pend_proc_ai)
-            c5.metric("Proc. AI Gerados", concluidos)
-
-            st.write("---")
-
-            col_g1, col_g2 = st.columns(2)
-
-            with col_g1:
-                st.markdown("### 🔬 Carga Ativa por Servidor de Laudo")
-                df_l = df.copy()
-                df_l['is_pendente'] = (df_l['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') & \
-                                      (df_l['laudo_sei'].astype(str).str.strip().isin(["", "nan", "None", "0"]))
-                df_l['Status_Laudo'] = df_l['is_pendente'].apply(lambda x: 'Pendente (Fazer Laudo)' if x else 'Concluído')
-                df_l_g = df_l.groupby(['s_laudo_limpo', 'Status_Laudo']).size().reset_index(name='Quantidade')
-                
-                fig_laudo = px.bar(
-                    df_l_g, 
-                    y='s_laudo_limpo', 
-                    x='Quantidade', 
-                    color='Status_Laudo',
-                    orientation='h',
-                    text_auto=True,
-                    color_discrete_map={'Pendente (Fazer Laudo)': '#EAB308', 'Concluído': '#4E5D30'}
-                )
-                fig_laudo.update_traces(textposition='auto')
-                fig_laudo.update_layout(yaxis_title="Servidor Laudo", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
-                st.plotly_chart(fig_laudo, use_container_width=True)
-
-            with col_g2:
-                st.markdown("### ⚖️ Carga por Fiscal Responsável")
-                df_fisc = df.copy()
-                df_f_g = df_fisc.groupby(['f_limpo', 'situacao']).size().reset_index(name='Quantidade')
-                
-                fig_fisc = px.bar(
-                    df_f_g, 
-                    y='f_limpo', 
-                    x='Quantidade', 
-                    color='situacao',
-                    orientation='h',
-                    text_auto=True
-                )
-                fig_fisc.update_traces(textposition='auto')
-                fig_fisc.update_layout(yaxis_title="Fiscal", xaxis_title="Qtd Processos", barmode='stack', margin=dict(l=0, r=0, t=20, b=0))
-                st.plotly_chart(fig_fisc, use_container_width=True)
-
-            st.write("---")
-
-            st.markdown("### 🌊 Distribuição de Processos por Bacia Sedimentar")
-            df_bacia = df.groupby(['bacia', 'situacao']).size().reset_index(name='Quantidade')
-            fig_bacia = px.bar(
-                df_bacia, 
-                x='bacia', 
-                y='Quantidade', 
-                color='situacao',
-                barmode='group',
-                text_auto=True
-            )
-            fig_bacia.update_traces(textposition='outside')
-            fig_bacia.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=False, title=None)
-            fig_bacia.update_xaxes(showgrid=False)
-            fig_bacia.update_layout(xaxis_title="Bacia Sedimentar", yaxis_title=None, bargap=0.3, bargroupgap=0.15, margin=dict(l=0, r=0, t=20, b=0))
-            st.plotly_chart(fig_bacia, use_container_width=True)
-
-        # --- ABA 2: PLANILHA GERAL E ATRIBUIÇÕES ---
-        with tab_planilha:
+        # --- ABA 1: PLANILHA GERAL E ATRIBUIÇÕES ---
+        with tab_planilha:        
             st.markdown("### 📋 Base Completa de Processos da Força-Tarefa")
 
             with st.container(border=True):
@@ -734,7 +739,7 @@ if df_original is not None and not df_original.empty:
                         except Exception as e:
                             st.error(f"Erro ao enviar atualização: {e}")
 
-        # --- ABA 3: ATRIBUIÇÃO AUTOMÁTICA BALANCEADA ---
+        # --- ABA 2: ATRIBUIÇÃO AUTOMÁTICA BALANCEADA ---
         with tab_auto:
             st.markdown("### 🎲 Sorteio e Distribuição Automática de Processos")
             st.caption("Distribuição balanceada considerando a carga ativa em aberto de cada servidor")
@@ -838,7 +843,7 @@ if df_original is not None and not df_original.empty:
                     st.cache_data.clear()
                     st.rerun()
 
-        # --- ABA 4: GESTÃO DA EQUIPE ---
+        # --- ABA 3: GESTÃO DA EQUIPE ---
         with tab_equipe:
             st.markdown("### 👥 Integrantes da Força-Tarefa")
             st.caption("Visualização das permissões dos servidores (as senhas não são exibidas)")
