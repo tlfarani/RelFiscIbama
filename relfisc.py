@@ -657,8 +657,9 @@ if df_original is not None and not df_original.empty:
             df_coord = df_coord.reset_index(drop=True)
 
             with st.container(border=True):
-                st.markdown("**⚡ Painel de Atribuição e Alteração em Lote**")
-                a_col1, a_col2, a_col3, a_col4 = st.columns(4)
+                st.markdown("**⚡ Painel de Atribuição em Lote**")
+                st.caption("A coluna SITUAÇÃO é calculada automaticamente pelas fórmulas do Excel.")
+                a_col1, a_col2, a_col3 = st.columns([1.5, 1.5, 1])
                 
                 if not df_equipe.empty:
                     eq_analise = df_equipe[(df_equipe['is_analise'] == True) & (df_equipe['status'] == 'APROVADO')]['nome'].tolist()
@@ -669,12 +670,11 @@ if df_original is not None and not df_original.empty:
                     lista_servidores = sorted([s for s in df['s_laudo_limpo'].unique() if s != "Não Atribuído"])
                     lista_fiscais = sorted([f for f in df['f_limpo'].unique() if f != "Não Atribuído"])
 
-                lista_situacoes = sorted([s for s in df['situacao'].astype(str).unique() if s])
-
-                with a_col1: novo_servidor = st.selectbox("Atribuir Servidor Laudo:", ["[ Não Alterar ]"] + lista_servidores)
-                with a_col2: novo_fiscal = st.selectbox("Atribuir Fiscal:", ["[ Não Alterar ]"] + lista_fiscais)
-                with a_col3: nova_situacao = st.selectbox("Alterar Situação:", ["[ Não Alterar ]"] + lista_situacoes)
-                with a_col4:
+                with a_col1: 
+                    novo_servidor = st.selectbox("Atribuir Servidor Laudo:", ["[ Não Alterar ]"] + lista_servidores)
+                with a_col2: 
+                    novo_fiscal = st.selectbox("Atribuir Fiscal:", ["[ Não Alterar ]"] + lista_fiscais)
+                with a_col3:
                     st.write("")
                     st.write("")
                     btn_atualizar = st.button("🔄 Aplicar no SharePoint", use_container_width=True)
@@ -713,27 +713,30 @@ if df_original is not None and not df_original.empty:
                     indices_marcados = tabela_coord_editada[tabela_coord_editada["Selecionar"] == True].index
                     if len(indices_marcados) == 0:
                         st.warning("⚠️ Marque pelo menos um processo na tabela abaixo.")
-                    elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]" and nova_situacao == "[ Não Alterar ]":
+                    elif novo_servidor == "[ Não Alterar ]" and novo_fiscal == "[ Não Alterar ]":
                         st.info("💡 Escolha ao menos uma alteração nos menus acima.")
                     else:
-                        processos_alvo = [str(p) for p in df_coord.iloc[indices_marcados]['processo_sei'].tolist()]
-                        ids_alvo = [str(i) for i in df_coord.iloc[indices_marcados]['num_doc'].tolist()]
-
-                        payload_atualizacao = {
-                            "acao": "ATUALIZAR",
-                            "processos_sei": processos_alvo,
-                            "ids": ids_alvo,
-                            "novo_servidor_laudo": novo_servidor if novo_servidor != "[ Não Alterar ]" else "",
-                            "novo_fiscal": novo_fiscal if novo_fiscal != "[ Não Alterar ]" else "",
-                            "nova_situacao": nova_situacao if nova_situacao != "[ Não Alterar ]" else ""
-                        }
-
                         try:
                             url_planilha = st.secrets["sharepoint"]["url_planilha"]
-                            with st.spinner("Atualizando registros no SharePoint..."):
-                                resp = requests.post(url_planilha, json=payload_atualizacao, headers={"Content-Type": "application/json"})
-                                resp.raise_for_status()
-                            st.success(f"✅ Sucesso! {len(processos_alvo)} processos atualizados no SharePoint.")
+                            with st.spinner(f"Atualizando {len(indices_marcados)} processos no SharePoint..."):
+                                for idx_alvo in indices_marcados:
+                                    row_alvo = df_coord.iloc[idx_alvo]
+                                    
+                                    # Preserva o responsável atual se o seletor estiver em [ Não Alterar ]
+                                    serv_envio = novo_servidor if novo_servidor != "[ Não Alterar ]" else str(row_alvo.get('servidor_laudo', ''))
+                                    fisc_envio = novo_fiscal if novo_fiscal != "[ Não Alterar ]" else str(row_alvo.get('fiscal', ''))
+
+                                    payload_individual = {
+                                        "acao": "ATUALIZAR",
+                                        "processos_sei": [str(row_alvo['processo_sei'])],
+                                        "ids": [str(row_alvo['num_doc'])],
+                                        "novo_servidor_laudo": serv_envio,
+                                        "novo_fiscal": fisc_envio
+                                    }
+                                    resp = requests.post(url_planilha, json=payload_individual, headers={"Content-Type": "application/json"})
+                                    resp.raise_for_status()
+
+                            st.success(f"✅ Sucesso! {len(indices_marcados)} processos atualizados no SharePoint.")
                             st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
@@ -834,21 +837,29 @@ if df_original is not None and not df_original.empty:
 
                 if st.button("🚀 Confirmar e Gravar Atribuições no SharePoint", use_container_width=True):
                     processos_alvo = [str(p) for p in df_res['processo_sei'].tolist()]
-                    ids_alvo = [str(i) for i in df_res['num_doc'].tolist()]
+                    
+                    with st.spinner(f"Gravando {len(df_res)} atribuições no SharePoint..."):
+                        for idx, row_dist in df_res.iterrows():
+                            resp_sorteado = str(row_dist['Novo_Responsavel'])
+                            
+                            if "Laudo" in tipo_t:
+                                serv_envio = resp_sorteado
+                                fisc_envio = str(row_dist.get('fiscal', ''))
+                            else:
+                                serv_envio = str(row_dist.get('servidor_laudo', ''))
+                                fisc_envio = resp_sorteado
 
-                    for idx, row_dist in df_res.iterrows():
-                        resp_sorteado = str(row_dist['Novo_Responsavel'])
-                        payload_single = {
-                            "acao": "ATUALIZAR",
-                            "processos_sei": [str(row_dist['processo_sei'])],
-                            "ids": [str(row_dist['num_doc'])],
-                            "novo_servidor_laudo": resp_sorteado if "Laudo" in tipo_t else "",
-                            "novo_fiscal": resp_sorteado if "Auto" in tipo_t else "",
-                            "nova_situacao": ""
-                        }
-                        try:
-                            requests.post(st.secrets["sharepoint"]["url_planilha"], json=payload_single, headers={"Content-Type": "application/json"})
-                        except: pass
+                            payload_single = {
+                                "acao": "ATUALIZAR",
+                                "processos_sei": [str(row_dist['processo_sei'])],
+                                "ids": [str(row_dist['num_doc'])],
+                                "novo_servidor_laudo": serv_envio,
+                                "novo_fiscal": fisc_envio
+                            }
+                            try:
+                                requests.post(st.secrets["sharepoint"]["url_planilha"], json=payload_single, headers={"Content-Type": "application/json"})
+                            except Exception as e:
+                                st.error(f"Erro ao atualizar processo {row_dist['processo_sei']}: {e}")
 
                     st.success(f"✅ {len(processos_alvo)} processos gravados com sucesso!")
                     del st.session_state['resultado_distribuicao']
