@@ -752,17 +752,29 @@ if df_original is not None and not df_original.empty:
                 bacias_disp = ["Todas as Bacias"] + sorted([b for b in df['bacia'].astype(str).unique() if b and b != "nan"])
                 bacia_alvo = st.selectbox("Filtrar Bacia Sedimentar:", bacias_disp)
 
+                # FILTROS: Situação correspondente + Responsável NÃO atribuído (vazio)
                 if "Laudo" in tipo_tarefa:
-                    df_pend = df[df['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo']
+                    df_pend = df[
+                        (df['situacao'].astype(str).str.strip().str.lower() == 'fazer laudo') &
+                        (df['s_laudo_limpo'] == 'Não Atribuído')
+                    ]
                 else:
-                    df_pend = df[df['situacao'].astype(str).str.strip().str.lower() == 'autuar']
+                    df_pend = df[
+                        (df['situacao'].astype(str).str.strip().str.lower() == 'autuar') &
+                        (df['f_limpo'] == 'Não Atribuído')
+                    ]
 
                 if bacia_alvo != "Todas as Bacias":
                     df_pend = df_pend[df_pend['bacia'].astype(str) == bacia_alvo]
 
                 qtd_disponivel = len(df_pend)
-                st.info(f"📌 Processos pendentes encontrados: **{qtd_disponivel}**")
-                qtd_distribuir = st.number_input("Quantidade de processos a atribuir:", min_value=1, max_value=max(1, qtd_disponivel), value=min(5, max(1, qtd_disponivel)))
+                st.info(f"📌 Processos não atribuídos disponíveis: **{qtd_disponivel}**")
+                qtd_distribuir = st.number_input(
+                    "Quantidade de processos a atribuir:", 
+                    min_value=1, 
+                    max_value=max(1, qtd_disponivel), 
+                    value=min(5, max(1, qtd_disponivel))
+                )
 
             with col_a2:
                 st.markdown("**2. Equipe Elegível Habilitada**")
